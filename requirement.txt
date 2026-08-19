@@ -1,0 +1,336 @@
+Implement a complete authentication flow supporting two authentication methods: Local Email/Password and Google OAuth/OpenID Connect.
+
+Use the existing Users table:
+
+Users
+- Id
+- FirstName
+- LastName
+- Email
+- PasswordHash
+- AuthProvider
+- ProviderUserId
+- RoleId
+- IsActive
+- EmailVerified
+- CreatedAt
+- UpdatedAt
+
+Existing constraints:
+- UX_Users_Email is UNIQUE on Email.
+- UX_Users_Provider is UNIQUE on (AuthProvider, ProviderUserId) where ProviderUserId IS NOT NULL.
+
+IMPORTANT AUTHENTICATION RULES:
+
+1. LOCAL REGISTRATION
+- User selects "Register with Email/Password".
+- Accept FirstName, LastName, Email and Password.
+- Normalize the email before processing, preferably lowercase and trimmed.
+- Check whether the email already exists in Users.
+- If email does not exist:
+  - Hash the password using bcrypt.
+  - Create a Users record with:
+    - PasswordHash = bcrypt hash
+    - AuthProvider = 'Local'
+    - ProviderUserId = NULL
+    - RoleId = default/user role
+    - IsActive = 1
+    - EmailVerified according to the application's email-verification flow.
+- Never store the user's plain-text password.
+- Never attempt to decrypt a bcrypt password hash.
+
+2. LOCAL REGISTRATION WHEN EMAIL ALREADY EXISTS
+- If the email already exists and AuthProvider = 'Local':
+  - Do not create another user.
+  - Return a clear message such as:
+    "An account with this email already exists. Please log in with your email and password."
+- If the email exists and AuthProvider = 'Google':
+  - Do not create another user.
+  - Return a clear message such as:
+    "This email is already registered with Google. Please continue with Google."
+- Because UX_Users_Email is unique, never attempt to create duplicate users with the same email.
+
+3. LOCAL LOGIN
+- User enters Email and Password.
+- Normalize the email.
+- Find the user by Email.
+- If the user does not exist:
+  - Return a generic invalid-login message.
+- If the user exists:
+  - Check IsActive.
+  - If IsActive = 0, reject login with an appropriate inactive-account message.
+  - Check AuthProvider.
+- If AuthProvider = 'Local':
+  - Ensure PasswordHash is not NULL.
+  - Use bcrypt verification:
+    bcrypt.Verify(enteredPassword, storedPasswordHash)
+  - If verification succeeds:
+    - Authenticate the user.
+    - Generate the application's JWT/access token.
+    - Include the appropriate user information/claims such as UserId and RoleId.
+  - If verification fails:
+    - Reject login with invalid credentials.
+- If AuthProvider = 'Google':
+  - Do NOT attempt bcrypt verification because PasswordHash should be NULL.
+  - Return:
+    "This account was registered using Google. Please continue with Google."
+- Never compare the user's plain password directly with PasswordHash.
+- Never decrypt PasswordHash.
+
+4. GOOGLE REGISTRATION / FIRST GOOGLE LOGIN
+- User selects "Continue with Google".
+- Redirect/authenticate through Google OAuth/OpenID Connect.
+- Google handles the user's Google password, MFA and Google authentication.
+- The application must never receive or store the user's Google password.
+- After successful Google authentication, validate Google's returned identity/token on the backend.
+- Only after successful token validation, obtain the trusted Google identity information.
+- Use Google's stable unique user identifier (`sub` / provider user ID) as ProviderUserId.
+- Obtain the verified Google email and user profile information such as first name and last name.
+- Normalize the email.
+
+5. GOOGLE LOGIN - EXISTING GOOGLE ACCOUNT
+- After Google authentication succeeds, first check Users using:
+  AuthProvider = 'Google'
+  AND ProviderUserId = Google's stable user ID.
+- If a matching Google user exists:
+  - Verify IsActive.
+  - If inactive, reject login.
+  - If active, authenticate the user.
+  - Generate the application's JWT/access token.
+  - Do not ask for or verify a password in our database.
+- The matching process is:
+  Google's verified identity
+       ↓
+  Google ProviderUserId/sub
+       ↓
+  Users.AuthProvider + Users.ProviderUserId
+       ↓
+  Existing user
+       ↓
+  Generate our application JWT.
+
+6. GOOGLE REGISTRATION - NEW GOOGLE USER
+- If Google authentication succeeds but no matching:
+  AuthProvider = 'Google'
+  AND ProviderUserId = Google user ID
+  exists:
+  - Check whether the Google-provided verified email already exists in Users.
+
+7. GOOGLE LOGIN WHEN EMAIL ALREADY EXISTS AS LOCAL ACCOUNT
+- Scenario:
+  Existing database record:
+    Email = user@example.com
+    AuthProvider = 'Local'
+    PasswordHash = bcrypt hash
+    ProviderUserId = NULL
+
+  User now clicks "Continue with Google".
+  Google successfully authenticates the same email:
+    Google email = user@example.com
+    Google ProviderUserId = 123456789
+
+- DO NOT automatically create a second Users record.
+- Because Email is unique, the existing Local account must be detected.
+- Inform the user:
+  "An account with this email already exists using email/password. Please sign in with your email and password first. You can then link your Google account if account linking is supported."
+- Do not silently replace AuthProvider from Local to Google.
+- Do not overwrite PasswordHash.
+- Do not create a duplicate account.
+- Do not automatically link Google to the Local account merely because the emails match.
+
+8. GOOGLE LOGIN WHEN EMAIL ALREADY EXISTS AS GOOGLE ACCOUNT BUT PROVIDER ID DOES NOT MATCH
+- If the email exists but the existing record has:
+  AuthProvider = 'Google'
+  and ProviderUserId is different from the returned Google ProviderUserId:
+- Treat this as an account/provider identity conflict.
+- Do not overwrite ProviderUserId automatically.
+- Do not create a duplicate account.
+- Log the security-relevant conflict appropriately.
+- Return a safe error requiring further account verification/support if necessary.
+
+9. NEW GOOGLE USER CREATION
+- If:
+  - Google authentication/token validation succeeds,
+  - ProviderUserId does not exist,
+  - Email does not exist in Users,
+  then create a new Users record:
+    FirstName = Google first name
+    LastName = Google last name
+    Email = verified Google email
+    PasswordHash = NULL
+    AuthProvider = 'Google'
+    ProviderUserId = Google stable user ID
+    RoleId = default/user role
+    IsActive = 1
+    EmailVerified = 1, because the identity/email has been verified by the configured Google authentication flow.
+- Then generate our application's JWT/access token.
+
+10. NEVER USE GOOGLE PASSWORD
+- Google login must never do:
+  bcrypt.Verify(GooglePassword, ...)
+- The application's backend never receives the Google password.
+- Google itself authenticates the user.
+- Our application only verifies Google's signed identity/token and then identifies the user using Google's ProviderUserId.
+
+11. AUTHENTICATION COMPARISON
+Implement the logic conceptually as:
+
+LOCAL:
+User enters email + password
+    ↓
+Find Users by email
+    ↓
+Check AuthProvider
+    ↓
+AuthProvider = Local
+    ↓
+bcrypt.Verify(enteredPassword, PasswordHash)
+    ↓
+Success
+    ↓
+Generate application JWT
+
+GOOGLE:
+User clicks Continue with Google
+    ↓
+Google authenticates user
+    ↓
+Backend validates Google's token/identity
+    ↓
+Get Google ProviderUserId/sub + verified email
+    ↓
+Find Users by AuthProvider + ProviderUserId
+    ↓
+If found → login
+    ↓
+If not found → check email
+    ↓
+If email belongs to Local → tell user existing Local account
+    ↓
+If email does not exist → create Google user
+    ↓
+Generate application JWT
+
+12. JWT
+- Both Local login and Google login must ultimately produce the application's own authentication token/JWT.
+- The frontend should not need separate authorization logic for Local versus Google after successful authentication.
+- The backend should use the authenticated UserId and RoleId from the application's authentication mechanism for protected APIs.
+- Google authentication is only the identity verification mechanism; it should not replace the application's authorization/session system.
+
+13. SECURITY
+- Never store plain-text passwords.
+- Use bcrypt for Local passwords.
+- Never decrypt bcrypt hashes.
+- Never store Google's password.
+- Validate Google ID tokens/access tokens according to Google's official authentication requirements.
+- Verify issuer, audience/client ID, expiry and signature as required.
+- Do not trust arbitrary client-supplied Google email or ProviderUserId without validating Google's token.
+- Normalize emails consistently.
+- Do not automatically merge accounts solely because two email addresses match unless an explicit secure account-linking flow is implemented.
+- Do not allow duplicate Local or Google identities.
+- Respect the existing unique indexes.
+
+
+Users
+- Id
+- FirstName
+- LastName
+- Email
+- RoleId
+- IsActive
+- EmailVerified
+- CreatedAt
+- UpdatedAt
+
+UserAuthProviders
+- Id
+- UserId
+- Provider
+- ProviderUserId
+- PasswordHash
+- CreatedAt
+
+This allows one user account to have:
+  Local + Google
+
+But if the current project is intentionally keeping the existing Users schema, do not redesign the database unless necessary. Implement the safe behavior described above using the existing schema.
+
+15. REQUIRED SCENARIOS TO TEST
+
+Test all of these cases:
+
+A. New Local registration
+Email does not exist → create Local user.
+
+B. Existing Local registration
+Email already exists as Local → reject duplicate and tell user to login.
+
+C. New Local login with correct password
+Email exists + Local + bcrypt verification succeeds → JWT.
+
+D. Local login with wrong password
+Email exists + Local + bcrypt verification fails → reject.
+
+E. Local login against Google account
+Email exists + AuthProvider = Google → do not bcrypt verify; tell user to use Google.
+
+F. New Google registration
+Google authentication succeeds + Google ProviderUserId does not exist + email does not exist → create Google user → JWT.
+
+G. Existing Google login
+Google authentication succeeds + ProviderUserId exists → find user → JWT.
+
+H. Google login for existing Local email
+Google authentication succeeds + Google ProviderUserId not found + email exists as Local → do not create duplicate → tell user the email is registered with email/password.
+
+I. Google provider conflict
+Email exists as Google but ProviderUserId does not match → do not overwrite or create duplicate → return safe conflict response.
+
+J. Inactive Local account
+Local user exists but IsActive = 0 → reject login.
+
+K. Inactive Google account
+Google user exists but IsActive = 0 → reject login.
+
+L. Duplicate Google identity
+Same AuthProvider + ProviderUserId → must never create another user.
+
+M. Duplicate email
+Same email → must never create another Users record because UX_Users_Email is unique.
+
+16. IMPORTANT IMPLEMENTATION PRINCIPLE
+
+Do not think of Local login and Google login as "two different users".
+
+They are two different ways of authenticating an account.
+
+With the current Users table:
+
+Local user:
+  Email = user@example.com
+  PasswordHash = bcrypt(...)
+  AuthProvider = Local
+  ProviderUserId = NULL
+
+Google user:
+  Email = user@example.com
+  PasswordHash = NULL
+  AuthProvider = Google
+  ProviderUserId = Google sub
+
+Local authentication verifies:
+  entered password ↔ bcrypt PasswordHash
+
+Google authentication verifies:
+  Google ↔ Google identity/token
+  then:
+  Google ProviderUserId ↔ Users.ProviderUserId
+
+After either authentication succeeds:
+  User authenticated
+       ↓
+  Application JWT
+       ↓
+  Protected APIs
+
+Implement the backend, database access, authentication services, controllers/endpoints, validation, error handling and tests according to this flow. Before modifying the database schema, inspect the existing schema and existing authentication code and reuse the current architecture where possible.

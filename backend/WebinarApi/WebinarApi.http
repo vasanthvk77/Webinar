@@ -1,0 +1,6 @@
+@WebinarApi_HostAddress = http://localhost:5270
+
+GET {{WebinarApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
