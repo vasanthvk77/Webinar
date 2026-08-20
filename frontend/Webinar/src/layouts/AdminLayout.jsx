@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Box } from '@mui/material';
 import { Outlet } from 'react-router-dom';
-import AdminSidebar from '../components/Sidebar/AdminSidebar';
-import AdminTopbar  from '../components/Topbar/AdminTopbar';
-import { colors }   from '../utils/theme';
+import AdminSidebar         from '../components/Sidebar/AdminSidebar';
+import AdminTopbar          from '../components/Topbar/AdminTopbar';
+import { useThemeColors }   from '../context/ThemeContext';
 
 const SIDEBAR_WIDTH_EXPANDED = 260;
 const SIDEBAR_WIDTH_COLLAPSED = 64;
@@ -12,6 +12,7 @@ const TOPBAR_HEIGHT = 64;
 export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const sidebarWidth = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
+  const colors = useThemeColors();
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: colors.bg }}>

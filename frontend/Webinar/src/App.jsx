@@ -3,12 +3,12 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { Toaster } from 'react-hot-toast';
 
+import { ThemeContextProvider, useAppTheme } from './context/ThemeContext';
 import { AuthProvider }    from './context/AuthContext';
 import PrivateRoute        from './guards/PrivateRoute';
 import RoleGuard           from './guards/RoleGuard';
 import StudentLayout       from './layouts/StudentLayout';
 import AdminLayout         from './layouts/AdminLayout';
-import theme               from './utils/theme';
 import { setSessionExpiredHandler } from './services/api';
 import SessionExpiredModal from './components/SessionExpiredModal';
 
@@ -22,7 +22,6 @@ import AccessControl       from './pages/admin/AccessControl';
 // RoleRedirect
 // Reads the logged-in user's roleId from localStorage and
 // sends them to the correct home route.
-// Used for the "/" catch-all when already authenticated.
 // -------------------------------------------------------
 function RoleRedirect() {
   try {
@@ -35,26 +34,24 @@ function RoleRedirect() {
   }
 }
 
-export default function App() {
+// -------------------------------------------------------
+// Inner app — consumes the live muiTheme from ThemeContext
+// -------------------------------------------------------
+function AppInner() {
+  const { muiTheme } = useAppTheme();
   const [showSessionExpired, setShowSessionExpired] = useState(false);
 
-  // Register handler for session expired modal
   useEffect(() => {
-    setSessionExpiredHandler(() => {
-      setShowSessionExpired(true);
-    });
-
-    // Cleanup on unmount
+    setSessionExpiredHandler(() => setShowSessionExpired(true));
     return () => setSessionExpiredHandler(null);
   }, []);
 
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={muiTheme}>
       <CssBaseline />
       <Toaster position="top-right" reverseOrder={false} />
       <AuthProvider>
         <BrowserRouter>
-          {/* Session Expired Modal - renders at app root level */}
           <SessionExpiredModal
             open={showSessionExpired}
             onClose={() => setShowSessionExpired(false)}
@@ -76,7 +73,6 @@ export default function App() {
                 </PrivateRoute>
               }
             >
-              {/* Index: redirect to /dashboard */}
               <Route index element={<ModulePlaceholder />} />
               <Route path="profile"       element={<ModulePlaceholder />} />
               <Route path="upcoming"      element={<ModulePlaceholder />} />
@@ -99,7 +95,6 @@ export default function App() {
                 </PrivateRoute>
               }
             >
-              {/* /admin → redirect to /admin/dashboard */}
               <Route index element={<Navigate to="/admin/dashboard" replace />} />
 
               {/* ── Webinar Management ── */}
@@ -111,11 +106,7 @@ export default function App() {
               <Route path="recordings"    element={<ModulePlaceholder />} />
 
               {/* ── Admin & Settings ── */}
-              {/* AdminAccounts handles its own 403 state internally —
-                  both Super Admin and Admin can reach the route,
-                  but the page shows a friendly message for Admins */}
               <Route path="accounts" element={<AdminAccounts />} />
-              {/* Access Control — Super Admin only */}
               <Route
                 path="access"
                 element={
@@ -148,5 +139,17 @@ export default function App() {
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>
+  );
+}
+
+// -------------------------------------------------------
+// App — wraps everything in ThemeContextProvider so
+// useAppTheme() is available everywhere in the tree.
+// -------------------------------------------------------
+export default function App() {
+  return (
+    <ThemeContextProvider>
+      <AppInner />
+    </ThemeContextProvider>
   );
 }

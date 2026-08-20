@@ -18,10 +18,11 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import toast                  from 'react-hot-toast';
 import { adminService }       from '../../services/api';
 import { useAuth }            from '../../context/AuthContext';
-import { colors }             from '../../utils/theme';
+import { useThemeColors }     from '../../context/ThemeContext';
 import CustomSearchBar        from '../../components/CustomSearchBar';
 
 export default function AdminAccounts() {
+  const colors = useThemeColors();
   const { isSuperAdmin } = useAuth();
 
   const [admins,    setAdmins]    = useState([]);

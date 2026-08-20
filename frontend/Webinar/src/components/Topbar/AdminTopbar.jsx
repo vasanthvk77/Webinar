@@ -2,20 +2,24 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, AppBar, Toolbar, Typography, IconButton,
-  Avatar, Menu, MenuItem, Divider, Badge, Chip,
+  Avatar, Menu, MenuItem, Divider, Badge, Chip, Tooltip,
 } from '@mui/material';
-import NotificationsIcon from '@mui/icons-material/Notifications';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutlineOutlined";
-import LogoutIcon from '@mui/icons-material/Logout';
-import PersonIcon from '@mui/icons-material/Person';
-import SettingsIcon from '@mui/icons-material/Settings';
-import { useAuth } from '../../context/AuthContext';
-import { colors } from '../../utils/theme';
-import CustomSearchBar from '../CustomSearchBar';
+import NotificationsIcon      from '@mui/icons-material/Notifications';
+import CalendarMonthIcon      from '@mui/icons-material/CalendarMonth';
+import ChatBubbleOutlineIcon  from '@mui/icons-material/ChatBubbleOutlineOutlined';
+import LogoutIcon             from '@mui/icons-material/Logout';
+import PersonIcon             from '@mui/icons-material/Person';
+import SettingsIcon           from '@mui/icons-material/Settings';
+import LightModeIcon          from '@mui/icons-material/LightMode';
+import DarkModeIcon           from '@mui/icons-material/DarkMode';
+import { useAuth }            from '../../context/AuthContext';
+import { useThemeColors, useAppTheme } from '../../context/ThemeContext';
+import CustomSearchBar        from '../CustomSearchBar';
 
 export default function AdminTopbar({ sidebarWidth }) {
   const { user, logout, isSuperAdmin } = useAuth();
+  const colors = useThemeColors();
+  const { isDark, toggleTheme } = useAppTheme();
   const navigate = useNavigate();
 
   const [anchorEl, setAnchorEl] = useState(null);
@@ -38,7 +42,7 @@ export default function AdminTopbar({ sidebarWidth }) {
         bgcolor: colors.surface,
         borderBottom: `1px solid ${colors.border}`,
         zIndex: 99,
-        transition: 'left 0.2s ease, width 0.2s ease',
+        transition: 'left 0.2s ease, width 0.2s ease, background-color 0.3s ease',
         boxShadow: 'none',
       }}
     >
@@ -85,6 +89,27 @@ export default function AdminTopbar({ sidebarWidth }) {
           <ChatBubbleOutlineIcon sx={{ fontSize: 22 }} />
         </IconButton>
 
+        {/* ── Dark / Light mode toggle ── */}
+        <Tooltip title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+          <IconButton
+            size="small"
+            onClick={toggleTheme}
+            sx={{
+              color: isDark ? colors.accent : colors.textSecondary,
+              bgcolor: isDark ? colors.accentMuted : 'transparent',
+              borderRadius: '50%',
+              transition: 'all 0.25s ease',
+              '&:hover': {
+                bgcolor: colors.accentMuted,
+                color: colors.accent,
+                transform: 'rotate(20deg) scale(1.1)',
+              },
+            }}
+          >
+            {isDark ? <LightModeIcon sx={{ fontSize: 22 }} /> : <DarkModeIcon sx={{ fontSize: 22 }} />}
+          </IconButton>
+        </Tooltip>
+
         {/* Avatar button */}
         <Box
           onClick={(e) => setAnchorEl(e.currentTarget)}
@@ -98,10 +123,13 @@ export default function AdminTopbar({ sidebarWidth }) {
         >
           <Avatar
             sx={{
-              width: 34, height: 34,
-              bgcolor: isSuperAdmin ? colors.accent : colors.primary,
-              color: isSuperAdmin ? colors.textOnAccent : colors.textOnDark,
-              fontSize: '13px', fontWeight: 700,
+              width: 34,
+              height: 34,
+              bgcolor: isSuperAdmin ? colors.accent : (isDark ? 'rgba(255, 255, 255, 0.08)' : colors.primary),
+              color: isSuperAdmin ? colors.textOnAccent : (isDark ? colors.accent : colors.textOnDark),
+              fontSize: '13px',
+              fontWeight: 700,
+              border: isDark ? `1px solid ${colors.border}` : 'none',
             }}
           >
             {initials}
@@ -126,8 +154,9 @@ export default function AdminTopbar({ sidebarWidth }) {
           PaperProps={{
             sx: {
               mt: 1, minWidth: 200, borderRadius: 2,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+              boxShadow: `0 8px 24px ${colors.shadowMd}`,
               border: `1px solid ${colors.border}`,
+              bgcolor: colors.surface,
             },
           }}
         >
@@ -148,6 +177,20 @@ export default function AdminTopbar({ sidebarWidth }) {
             </Box>
             <Typography sx={{ fontSize: '11px', color: colors.textMuted }}>{user?.email}</Typography>
           </Box>
+
+          <Divider sx={{ borderColor: colors.border }} />
+
+          {/* Theme toggle in menu */}
+          <MenuItem
+            onClick={() => { setAnchorEl(null); toggleTheme(); }}
+            sx={{ gap: 1.5, fontSize: '13px', color: colors.textPrimary }}
+          >
+            {isDark
+              ? <LightModeIcon sx={{ fontSize: 18, color: colors.accent }} />
+              : <DarkModeIcon  sx={{ fontSize: 18, color: colors.textMuted }} />
+            }
+            {isDark ? 'Light Mode' : 'Dark Mode'}
+          </MenuItem>
 
           <Divider sx={{ borderColor: colors.border }} />
 

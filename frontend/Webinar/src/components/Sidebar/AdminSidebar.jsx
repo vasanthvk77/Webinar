@@ -10,7 +10,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon   from '@mui/icons-material/ExpandMore';
 import adminTabs        from '../../config/adminTabs';
 import { useAuth }      from '../../context/AuthContext';
-import { colors }       from '../../utils/theme';
+import { useThemeColors } from '../../context/ThemeContext';
 import logo             from '../../assets/logo1.png';
 
 const SIDEBAR_WIDTH   = 260;
@@ -30,7 +30,7 @@ const COLLAPSED_WIDTH = 64;
 //   • Label shifts right 4px
 // ─────────────────────────────────────────────────────────
 
-// Amber bubble constants
+// Amber bubble constants (static — same in both themes)
 const BUBBLE_ACTIVE_BG     = '#FEF3C7';
 const BUBBLE_ACTIVE_ICON   = '#D97706';
 const BUBBLE_ACTIVE_SHADOW = '0 6px 16px rgba(217,119,6,0.35)';
@@ -39,6 +39,7 @@ export default function AdminSidebar({ collapsed, onToggle }) {
   const navigate     = useNavigate();
   const { pathname } = useLocation();
   const { isSuperAdmin, canAccessTab, tabsReady } = useAuth();
+  const colors = useThemeColors();
 
   const [openSubMenu, setOpenSubMenu] = useState(() => {
     const open = {};

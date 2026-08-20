@@ -10,7 +10,7 @@ import {
   Box
 } from '@mui/material';
 import { AlertCircle, Clock } from 'lucide-react';
-import { colors } from '../utils/theme';
+import { useThemeColors } from '../context/ThemeContext';
 
 /**
  * SessionExpiredModal

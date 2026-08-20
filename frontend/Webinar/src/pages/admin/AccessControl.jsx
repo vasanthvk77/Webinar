@@ -9,7 +9,7 @@ import UndoIcon         from '@mui/icons-material/Undo';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import toast             from 'react-hot-toast';
 import { accessService } from '../../services/api';
-import { colors }        from '../../utils/theme';
+import { useThemeColors } from '../../context/ThemeContext';
 import adminTabs         from '../../config/adminTabs';
 import CustomSearchBar   from '../../components/CustomSearchBar';
 
@@ -55,6 +55,7 @@ const moduleStructure = adminTabs
 // when there are unsaved changes.
 // -------------------------------------------------------
 export default function AccessControl() {
+  const colors = useThemeColors();
   // ── Box 1: Admins ────────────────────────────────────
   const [admins,        setAdmins]        = useState([]);
   const [adminsLoading, setAdminsLoading] = useState(true);
@@ -303,8 +304,8 @@ export default function AccessControl() {
         ═══════════════════════════════════ */}
         <Paper elevation={0} sx={{ width: 250, flexShrink: 0, border: `1px solid ${colors.border}`, borderRadius: 2, overflow: 'hidden' }}>
           {/* Header */}
-          <Box sx={{ px: 2, py: 1.5, bgcolor: colors.primary }}>
-            <Typography sx={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+          <Box sx={{ px: 2, py: 1.5, bgcolor: colors.panelHeader }}>
+            <Typography sx={{ fontSize: '11px', fontWeight: 700, color: colors.panelHeaderText, opacity: 0.72, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
               Admin Users
             </Typography>
           </Box>
@@ -364,8 +365,8 @@ export default function AccessControl() {
             BOX 2 — Modules
         ═══════════════════════════════════ */}
         <Paper elevation={0} sx={{ width: 400, flexShrink: 0, border: `1px solid ${colors.border}`, borderRadius: 2, overflow: 'hidden' }}>
-          <Box sx={{ px: 2, py: 1.5, bgcolor: colors.primary }}>
-            <Typography sx={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+          <Box sx={{ px: 2, py: 1.5, bgcolor: colors.panelHeader }}>
+            <Typography sx={{ fontSize: '11px', fontWeight: 700, color: colors.panelHeaderText, opacity: 0.72, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
               Modules
             </Typography>
             {selectedAdmin && (
@@ -453,8 +454,8 @@ export default function AccessControl() {
             BOX 3 — Sub-modules
         ═══════════════════════════════════ */}
         <Paper elevation={0} sx={{ flexGrow: 1, border: `1px solid ${colors.border}`, borderRadius: 2, overflow: 'hidden' }}>
-          <Box sx={{ px: 2, py: 1.5, bgcolor: colors.primary }}>
-            <Typography sx={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>
+          <Box sx={{ px: 2, py: 1.5, bgcolor: colors.panelHeader }}>
+            <Typography sx={{ fontSize: '11px', fontWeight: 700, color: colors.panelHeaderText, opacity: 0.72, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
               {selectedModule ? selectedModule.label : 'Sub-modules'}
             </Typography>
             {selectedModule && (
@@ -565,8 +566,8 @@ export default function AccessControl() {
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 1300,
-            bgcolor: colors.primary,
-            color: colors.textOnDark,
+            bgcolor: colors.panelHeader,
+            color: colors.panelHeaderText,
             borderRadius: 3,
             px: 3, py: 1.5,
             display: 'flex', alignItems: 'center', gap: 2,

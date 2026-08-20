@@ -3,9 +3,9 @@ import {
   Box, List, ListItemButton, ListItemText,
   Typography,
 } from '@mui/material';
-import studentTabs from '../../config/studentTabs';
-import { colors }  from '../../utils/theme';
-import logo        from '../../assets/logo1.png';
+import studentTabs        from '../../config/studentTabs';
+import { useThemeColors, useAppTheme } from '../../context/ThemeContext';
+import logo               from '../../assets/logo1.png';
 
 const SIDEBAR_WIDTH = 240;
 
@@ -17,6 +17,8 @@ const BUBBLE_ACTIVE_SHADOW = '0 6px 16px rgba(217,119,6,0.35)';
 export default function StudentSidebar() {
   const navigate     = useNavigate();
   const { pathname } = useLocation();
+  const colors = useThemeColors();
+  const { isDark } = useAppTheme();
 
   const isActive = (route) => {
     if (route === '/dashboard') return pathname === '/dashboard';
@@ -155,18 +157,19 @@ export default function StudentSidebar() {
       <Box
         sx={{
           flexShrink: 0, m: 2, p: 2, borderRadius: 2,
-          bgcolor: colors.primary,
-          color: colors.textOnDark,
+          bgcolor: isDark ? colors.surfaceAlt : colors.primary,
+          color: isDark ? colors.textPrimary : colors.textOnDark,
+          border: isDark ? `1px solid ${colors.border}` : 'none',
           textAlign: 'center',
         }}
       >
-        <Typography sx={{ fontSize: '12px', fontWeight: 700, mb: 0.5 }}>
+        <Typography sx={{ fontSize: '12px', fontWeight: 700, mb: 0.5, color: isDark ? colors.textPrimary : colors.textOnDark }}>
           Keep Learning,
         </Typography>
-        <Typography sx={{ fontSize: '12px', fontWeight: 700, mb: 1.5, color: colors.highlight }}>
+        <Typography sx={{ fontSize: '12px', fontWeight: 700, mb: 1.5, color: colors.accent }}>
           Keep Growing!
         </Typography>
-        <Typography sx={{ fontSize: '11px', opacity: 0.8, mb: 1.5, lineHeight: 1.4 }}>
+        <Typography sx={{ fontSize: '11px', opacity: 0.8, mb: 1.5, lineHeight: 1.4, color: isDark ? colors.textSecondary : colors.textOnDark }}>
           Join live sessions, gain knowledge and earn certificates.
         </Typography>
         <Box

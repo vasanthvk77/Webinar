@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router-dom';
 import { Box, Typography, Paper } from '@mui/material';
-import BuildIcon  from '@mui/icons-material/Build';
-import { colors } from '../utils/theme';
+import BuildIcon          from '@mui/icons-material/Build';
+import { useThemeColors } from '../context/ThemeContext';
 
 const routeLabels = {
   // Student
@@ -37,6 +37,7 @@ export default function ModulePlaceholder() {
   const { pathname } = useLocation();
   const lastSegment  = pathname.split('/').filter(Boolean).pop();
   const moduleName   = routeLabels[lastSegment] || lastSegment || 'This Module';
+  const colors = useThemeColors();
 
   return (
     <Box

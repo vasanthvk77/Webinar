@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Box, InputBase, IconButton } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon  from '@mui/icons-material/Close';
-import { colors } from '../utils/theme';
+import { useThemeColors } from '../context/ThemeContext';
 
 // ─────────────────────────────────────────────────────────
 // CustomSearchBar
@@ -32,6 +32,7 @@ export default function CustomSearchBar({
   sx = {},
 }) {
   const [focused, setFocused] = useState(false);
+  const colors = useThemeColors();
 
   const isSmall   = size === 'sm';
   const fontSize  = isSmall ? '12.5px' : '13.5px';

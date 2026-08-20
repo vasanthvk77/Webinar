@@ -2,19 +2,23 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, AppBar, Toolbar, Typography, IconButton,
-  Avatar, Menu, MenuItem, Divider, Badge,
+  Avatar, Menu, MenuItem, Divider, Badge, Tooltip,
 } from '@mui/material';
-import NotificationsIcon from '@mui/icons-material/Notifications';
-import LogoutIcon        from '@mui/icons-material/Logout';
-import PersonIcon        from '@mui/icons-material/Person';
-import { useAuth }       from '../../context/AuthContext';
-import { colors }        from '../../utils/theme';
-import CustomSearchBar   from '../CustomSearchBar';
+import NotificationsIcon  from '@mui/icons-material/Notifications';
+import LogoutIcon         from '@mui/icons-material/Logout';
+import PersonIcon         from '@mui/icons-material/Person';
+import LightModeIcon      from '@mui/icons-material/LightMode';
+import DarkModeIcon       from '@mui/icons-material/DarkMode';
+import { useAuth }        from '../../context/AuthContext';
+import { useThemeColors, useAppTheme } from '../../context/ThemeContext';
+import CustomSearchBar    from '../CustomSearchBar';
 
 const SIDEBAR_WIDTH = 240;
 
 export default function StudentTopbar() {
   const { user, logout } = useAuth();
+  const colors = useThemeColors();
+  const { isDark, toggleTheme } = useAppTheme();
   const navigate = useNavigate();
 
   const [anchorEl, setAnchorEl] = useState(null);
@@ -68,6 +72,27 @@ export default function StudentTopbar() {
           </Badge>
         </IconButton>
 
+        {/* Dark / Light mode toggle */}
+        <Tooltip title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+          <IconButton
+            size="small"
+            onClick={toggleTheme}
+            sx={{
+              color: isDark ? colors.accent : colors.textSecondary,
+              bgcolor: isDark ? colors.accentMuted : 'transparent',
+              borderRadius: '50%',
+              transition: 'all 0.25s ease',
+              '&:hover': {
+                bgcolor: colors.accentMuted,
+                color: colors.accent,
+                transform: 'rotate(20deg) scale(1.1)',
+              },
+            }}
+          >
+            {isDark ? <LightModeIcon sx={{ fontSize: 22 }} /> : <DarkModeIcon sx={{ fontSize: 22 }} />}
+          </IconButton>
+        </Tooltip>
+
         {/* Avatar button */}
         <Box
           onClick={(e) => setAnchorEl(e.currentTarget)}
@@ -80,10 +105,13 @@ export default function StudentTopbar() {
         >
           <Avatar
             sx={{
-              width: 34, height: 34,
-              bgcolor: colors.primary,
-              color:   colors.textOnDark,
-              fontSize: '13px', fontWeight: 700,
+              width: 34,
+              height: 34,
+              bgcolor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.primary,
+              color: isDark ? colors.accent : colors.textOnDark,
+              fontSize: '13px',
+              fontWeight: 700,
+              border: isDark ? `1px solid ${colors.border}` : 'none',
             }}
           >
             {initials}
@@ -108,8 +136,9 @@ export default function StudentTopbar() {
           PaperProps={{
             sx: {
               mt: 1, minWidth: 180, borderRadius: 2,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+              boxShadow: `0 8px 24px ${colors.shadowMd}`,
               border: `1px solid ${colors.border}`,
+              bgcolor: colors.surface,
             },
           }}
         >

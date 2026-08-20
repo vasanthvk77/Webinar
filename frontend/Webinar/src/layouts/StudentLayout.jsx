@@ -1,13 +1,14 @@
 import { Box } from '@mui/material';
 import { Outlet } from 'react-router-dom';
-import StudentSidebar from '../components/Sidebar/StudentSidebar';
-import StudentTopbar  from '../components/Topbar/StudentTopbar';
-import { colors }     from '../utils/theme';
+import StudentSidebar      from '../components/Sidebar/StudentSidebar';
+import StudentTopbar       from '../components/Topbar/StudentTopbar';
+import { useThemeColors }  from '../context/ThemeContext';
 
 const SIDEBAR_WIDTH = 240;
 const TOPBAR_HEIGHT = 64;
 
 export default function StudentLayout() {
+  const colors = useThemeColors();
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: colors.bg }}>
       <StudentSidebar />
