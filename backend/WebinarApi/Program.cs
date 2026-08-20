@@ -6,7 +6,7 @@ using WebinarApi.Database;
 using WebinarApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-
+builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 // -------------------------------------------------------
 // 1. CORS — allow requests from the frontend origins
 //    Origins are read from appsettings.json "frontend" array
@@ -43,7 +43,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer              = jwtIssuer,
             ValidAudience            = jwtAudience,
-            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
+            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            ClockSkew                = TimeSpan.Zero  // No grace period — expire exactly at exp
         };
     });
 
@@ -57,7 +58,10 @@ builder.Services.AddControllers();
 // -------------------------------------------------------
 // 3.5. Register Custom Services
 // -------------------------------------------------------
-builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAuthService,   AuthService>();
+builder.Services.AddScoped<IAdminService,  AdminService>();
+builder.Services.AddScoped<IAccessService, AccessService>();
+builder.Services.AddScoped<ITabService,    TabService>();
 
 // -------------------------------------------------------
 // 4. Swagger (Swashbuckle)

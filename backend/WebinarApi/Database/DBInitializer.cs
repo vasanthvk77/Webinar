@@ -11,11 +11,14 @@ namespace WebinarApi.Database;
 // -------------------------------------------------------
 public static class DBInitializer
 {
-    // SQL files to execute on startup, in dependency order
+    // SQL files to execute on startup, in dependency order.
+    // tabs.sql depends on both roles.sql and auth.sql (foreign keys to wms.Roles and wms.Users).
     private static readonly List<string> SqlFiles = new List<string>
     {
         "../../DBModels/roles.sql",
-        "../../DBModels/auth.sql"
+        "../../DBModels/auth.sql",
+        "../../DBModels/tabs.sql",
+        "../../DBModels/admin.sql"   // depends on Users, Roles, Tabs, RoleTabAccess, UserTabAccess
     };
 
     // Called from Program.cs on server startup
