@@ -163,5 +163,18 @@ export const accessService = {
     api.delete(`/api/access/admins/${userId}/overrides`),
 };
 
+// -------------------------------------------------------
+// Activity Logs — Super Admin only
+// -------------------------------------------------------
+export const activityLogService = {
+  // GET /api/activity-logs — fetches paginated, filtered audit logs
+  getLogs: (params) =>
+    api.get('/api/activity-logs', { params }),
+
+  // GET /api/activity-logs/lookups — fetches dynamic module/action filters
+  getLookups: () =>
+    api.get('/api/activity-logs/lookups'),
+};
+
 export default api;
 

@@ -31,6 +31,7 @@ namespace WebinarApi.Services
 
         public async Task<IEnumerable<string>> GetAllowedRoutesAsync(int userId, int roleId)
         {
+            _logger.LogInformation("[Tabs] GetAllowedRoutes called — UserId: {UserId}, RoleId: {RoleId}", userId, roleId);
             try
             {
                 using var conn = new SqlConnection(_connectionString);
@@ -51,11 +52,14 @@ namespace WebinarApi.Services
                     routes.Insert(0, "/admin/dashboard");
                 }
 
+                _logger.LogInformation("[Tabs] GetAllowedRoutes SUCCESS — UserId: {UserId}, RoleId: {RoleId}, Routes granted: {Count} ({Routes})",
+                    userId, roleId, routes.Count, string.Join(", ", routes));
+
                 return routes;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "GetAllowedRoutesAsync error for UserId {UserId}", userId);
+                _logger.LogError(ex, "[Tabs] GetAllowedRoutes EXCEPTION for UserId {UserId}, RoleId {RoleId}: {Message}", userId, roleId, ex.Message);
                 return Enumerable.Empty<string>();
             }
         }

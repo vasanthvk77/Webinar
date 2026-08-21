@@ -24,15 +24,23 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
-        // Validate request
+        _logger.LogInformation("[AuthController] POST /api/auth/register — Email: {Email}", request.Email);
+
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        {
+            _logger.LogWarning("[AuthController] Register request rejected — missing email or password.");
             return BadRequest(new { success = false, message = "Email and password are required." });
+        }
 
         var (success, message, user, token) = await _authService.RegisterAsync(request);
 
         if (!success)
+        {
+            _logger.LogWarning("[AuthController] Register responded 400 — {Message}", message);
             return BadRequest(new { success = false, message });
+        }
 
+        _logger.LogInformation("[AuthController] Register responded 200 — UserId: {UserId}", user?.Id);
         return Ok(new { success = true, message, user, token });
     }
 
@@ -43,15 +51,23 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
-        // Validate request
+        _logger.LogInformation("[AuthController] POST /api/auth/login — Email: {Email}", request.Email);
+
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        {
+            _logger.LogWarning("[AuthController] Login request rejected — missing email or password.");
             return BadRequest(new { success = false, message = "Email and password are required." });
+        }
 
         var (success, message, user, token) = await _authService.LoginAsync(request);
 
         if (!success)
+        {
+            _logger.LogWarning("[AuthController] Login responded 401 — {Message}", message);
             return Unauthorized(new { success = false, message });
+        }
 
+        _logger.LogInformation("[AuthController] Login responded 200 — UserId: {UserId}, Role: {Role}", user?.Id, user?.RoleName);
         return Ok(new { success = true, message, user, token });
     }
 
@@ -62,15 +78,23 @@ public class AuthController : ControllerBase
     [HttpPost("google")]
     public async Task<IActionResult> GoogleLogin([FromBody] GoogleTokenRequest request)
     {
+        _logger.LogInformation("[AuthController] POST /api/auth/google — Google token received.");
+
         if (string.IsNullOrWhiteSpace(request.Token))
+        {
+            _logger.LogWarning("[AuthController] Google login rejected — token is empty.");
             return BadRequest(new { success = false, message = "Google token is required." });
+        }
 
         var (success, message, user, token) = await _authService.GoogleLoginAsync(request);
 
         if (!success)
+        {
+            _logger.LogWarning("[AuthController] Google login responded 400 — {Message}", message);
             return BadRequest(new { success = false, message });
+        }
 
+        _logger.LogInformation("[AuthController] Google login responded 200 — UserId: {UserId}", user?.Id);
         return Ok(new { success = true, message, user, token });
     }
 }
-

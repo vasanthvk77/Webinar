@@ -17,6 +17,7 @@ import Signup              from './pages/Signup';
 import ModulePlaceholder   from './pages/ModulePlaceholder';
 import AdminAccounts       from './pages/admin/AdminAccounts';
 import AccessControl       from './pages/admin/AccessControl';
+import ActivityLogs        from './pages/admin/ActivityLogs';
 
 // -------------------------------------------------------
 // RoleRedirect
@@ -112,6 +113,14 @@ function AppInner() {
                 element={
                   <RoleGuard allowed={[1]}>
                     <AccessControl />
+                  </RoleGuard>
+                }
+              />
+              <Route
+                path="activity-logs"
+                element={
+                  <RoleGuard allowed={[1]}>
+                    <ActivityLogs />
                   </RoleGuard>
                 }
               />

@@ -32,6 +32,7 @@ import SmsIcon                from '@mui/icons-material/Sms';
 import WhatsAppIcon           from '@mui/icons-material/WhatsApp';
 import LibraryBooksIcon       from '@mui/icons-material/LibraryBooks';
 import CampaignIcon           from '@mui/icons-material/Campaign';
+import ManageSearchIcon       from '@mui/icons-material/ManageSearch';
 
 const adminTabs = [
   // ── Always visible — not permission-checked ───────────────────
@@ -50,6 +51,14 @@ const adminTabs = [
     label: 'Access Control',
     route: '/admin/access',
     icon: AdminPanelSettingsIcon,
+    superAdminOnly: true,
+  },
+
+  // Activity Logs: Super Admin only
+  {
+    label: 'Activity Logs',
+    route: '/admin/activity-logs',
+    icon: ManageSearchIcon,
     superAdminOnly: true,
   },
 

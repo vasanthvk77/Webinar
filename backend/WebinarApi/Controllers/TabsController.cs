@@ -39,11 +39,15 @@ public class TabsController : ControllerBase
         if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) ||
             !int.TryParse(User.FindFirstValue("RoleId"), out var roleId))
         {
+            _logger.LogWarning("[TabsController] GET /api/tabs — invalid or missing JWT claims.");
             return Unauthorized(new { success = false, message = "Invalid token claims" });
         }
 
+        _logger.LogInformation("[TabsController] GET /api/tabs — UserId: {UserId}, RoleId: {RoleId}", userId, roleId);
+
         var routes = await _tabService.GetAllowedRoutesAsync(userId, roleId);
 
+        _logger.LogInformation("[TabsController] GET /api/tabs responded 200 — UserId: {UserId}, {Count} routes returned.", userId, routes.Count());
         return Ok(new { success = true, routes });
     }
 }

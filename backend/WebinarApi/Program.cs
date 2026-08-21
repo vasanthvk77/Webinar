@@ -4,8 +4,29 @@ using Microsoft.OpenApi.Models;  // comes from Swashbuckle 6.9.0
 using System.Text;
 using WebinarApi.Database;
 using WebinarApi.Services;
+using Serilog;
+
+// ── Configure Serilog before anything else ───
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
+    .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
+    .WriteTo.Console(
+        restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning,
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: "Logs/app-.log",
+        rollingInterval: RollingInterval.Day,          // new file each day: app-20260302.log
+        retainedFileCountLimit: 30,                    // keep last 30 days
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext} | {Message:lj}{NewLine}{Exception}")
+    .Enrich.FromLogContext()
+    .CreateLogger();
+
+Log.Information("=== Webinar API Backend Starting ===");
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog();
 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 // -------------------------------------------------------
 // 1. CORS — allow requests from the frontend origins
@@ -62,6 +83,7 @@ builder.Services.AddScoped<IAuthService,   AuthService>();
 builder.Services.AddScoped<IAdminService,  AdminService>();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<ITabService,    TabService>();
+builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 
 // -------------------------------------------------------
 // 4. Swagger (Swashbuckle)

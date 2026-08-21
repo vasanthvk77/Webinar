@@ -44,10 +44,16 @@ public class AccessController : ControllerBase
     [HttpGet("admins")]
     public async Task<IActionResult> GetAdmins()
     {
+        _logger.LogInformation("[AccessController] GET /api/access/admins — CallerUserId: {UserId}", CallerUserId);
+
         if (CallerRoleId != 1)
+        {
+            _logger.LogWarning("[AccessController] GetAdmins FORBIDDEN — CallerUserId: {UserId}", CallerUserId);
             return Forbid();
+        }
 
         var admins = await _adminService.GetAllAdminsAsync();
+        _logger.LogInformation("[AccessController] GetAdmins responded 200 — CallerUserId: {UserId}", CallerUserId);
         return Ok(new { success = true, data = admins });
     }
 
@@ -58,15 +64,24 @@ public class AccessController : ControllerBase
     [HttpGet("admins/{userId:int}/tabs")]
     public async Task<IActionResult> GetTabMatrix(int userId)
     {
+        _logger.LogInformation("[AccessController] GET /api/access/admins/{TargetId}/tabs — CallerUserId: {UserId}", userId, CallerUserId);
+
         if (CallerRoleId != 1)
+        {
+            _logger.LogWarning("[AccessController] GetTabMatrix FORBIDDEN — CallerUserId: {UserId}", CallerUserId);
             return Forbid();
+        }
 
         // Verify the target is an admin (not super admin / student)
         var admin = await _adminService.GetAdminByIdAsync(userId);
         if (admin == null)
+        {
+            _logger.LogWarning("[AccessController] GetTabMatrix — admin not found for TargetId: {TargetId}", userId);
             return NotFound(new { success = false, message = "Admin user not found" });
+        }
 
         var matrix = await _accessService.GetAdminTabMatrixAsync(userId);
+        _logger.LogInformation("[AccessController] GetTabMatrix responded 200 — TargetId: {TargetId}", userId);
         return Ok(new { success = true, data = matrix });
     }
 
@@ -78,15 +93,26 @@ public class AccessController : ControllerBase
     public async Task<IActionResult> SetTabOverride(
         int userId, int tabId, [FromBody] SetTabOverrideRequest request)
     {
+        _logger.LogInformation("[AccessController] PUT /api/access/admins/{TargetId}/tabs/{TabId} — IsAllowed: {IsAllowed}, CallerUserId: {UserId}",
+            userId, tabId, request.IsAllowed, CallerUserId);
+
         if (CallerRoleId != 1)
+        {
+            _logger.LogWarning("[AccessController] SetTabOverride FORBIDDEN — CallerUserId: {UserId}", CallerUserId);
             return Forbid();
+        }
 
         var result = await _accessService.SetTabOverrideAsync(
             userId, tabId, request.IsAllowed, CallerUserId);
 
         if (result == null)
+        {
+            _logger.LogWarning("[AccessController] SetTabOverride responded 400 — TargetId: {TargetId}, TabId: {TabId}", userId, tabId);
             return BadRequest(new { success = false, message = "Failed to update tab access" });
+        }
 
+        _logger.LogInformation("[AccessController] SetTabOverride responded 200 — TargetId: {TargetId}, TabId: {TabId}, IsAllowed: {IsAllowed}",
+            userId, tabId, request.IsAllowed);
         return Ok(new { success = true, data = result });
     }
 
@@ -97,10 +123,21 @@ public class AccessController : ControllerBase
     [HttpDelete("admins/{userId:int}/overrides")]
     public async Task<IActionResult> ResetOverrides(int userId)
     {
-        if (CallerRoleId != 1)
-            return Forbid();
+        _logger.LogWarning("[AccessController] DELETE /api/access/admins/{TargetId}/overrides — CallerUserId: {UserId}", userId, CallerUserId);
 
-        var result = await _accessService.ResetOverridesAsync(userId);
+        if (CallerRoleId != 1)
+        {
+            _logger.LogWarning("[AccessController] ResetOverrides FORBIDDEN — CallerUserId: {UserId}", CallerUserId);
+            return Forbid();
+        }
+
+        var result = await _accessService.ResetOverridesAsync(userId, CallerUserId);
+
+        if (result.Success)
+            _logger.LogWarning("[AccessController] ResetOverrides responded 200 — TargetId: {TargetId} overrides cleared.", userId);
+        else
+            _logger.LogWarning("[AccessController] ResetOverrides responded 400 — TargetId: {TargetId}, Reason: {Reason}", userId, result.Message);
+
         return result.Success
             ? Ok(new { success = true, result.Message })
             : BadRequest(new { success = false, result.Message });
