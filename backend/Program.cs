@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;  // comes from Swashbuckle 6.9.0
 using System.Text;
+using System.Data;
+using Dapper;
 using WebinarApi.Database;
 using WebinarApi.Services;
 using Serilog;
@@ -24,6 +26,12 @@ Log.Logger = new LoggerConfiguration()
     .CreateLogger();
 
 Log.Information("=== Webinar API Backend Starting ===");
+
+// -------------------------------------------------------
+// Configure Dapper Type Handlers
+// -------------------------------------------------------
+SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
+SqlMapper.AddTypeHandler(new TimeOnlyTypeHandler());
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog();
@@ -84,6 +92,8 @@ builder.Services.AddScoped<IAdminService,  AdminService>();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<ITabService,    TabService>();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
+builder.Services.AddScoped<ICategoryService,   CategoryService>();
+builder.Services.AddScoped<IWebinarService,    WebinarService>();
 
 // -------------------------------------------------------
 // 4. Swagger (Swashbuckle)

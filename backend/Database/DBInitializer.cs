@@ -20,7 +20,9 @@ public static class DBInitializer
         "../../DBModels/auth.sql",
         "../../DBModels/tabs.sql",
         "../../DBModels/admin.sql",   // depends on Users, Roles, Tabs, RoleTabAccess, UserTabAccess
-        "../../DBModels/activitylog.sql"
+        "../../DBModels/activitylog.sql",
+        "../../DBModels/categories.sql",
+        "../../DBModels/webinars.sql"
     };
 
     // Called from Program.cs on server startup

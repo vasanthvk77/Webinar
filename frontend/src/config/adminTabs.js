@@ -68,7 +68,7 @@ const adminTabs = [
     route: '/admin/master',       // virtual — no page, toggles dropdown
     icon: LibraryBooksIcon,
     children: [
-      { label: 'Certifications',         route: '/admin/certifications', icon: CardMembershipIcon },
+      { label: 'Certificate Template',         route: '/admin/certifications', icon: CardMembershipIcon },
       { label: 'Categories',             route: '/admin/categories',     icon: CategoryIcon },
       { label: 'Webinar Types',          route: '/admin/webinar-types',  icon: TypeSpecimenIcon },
       { label: 'Reminder Configuration', route: '/admin/reminders',      icon: AlarmIcon },

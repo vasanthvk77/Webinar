@@ -176,5 +176,47 @@ export const activityLogService = {
     api.get('/api/activity-logs/lookups'),
 };
 
+// -------------------------------------------------------
+// Categories — Super Admin create/delete, all admins read
+// -------------------------------------------------------
+export const categoryService = {
+  // GET /api/categories
+  getAll: () =>
+    api.get('/api/categories'),
+
+  // POST /api/categories  body: { categoryName }
+  create: (categoryName) =>
+    api.post('/api/categories', { categoryName }),
+
+  // PUT /api/categories/:id  body: { categoryName }
+  update: (id, categoryName) =>
+    api.put(`/api/categories/${id}`, { categoryName }),
+
+  // DELETE /api/categories/:id
+  delete: (id) =>
+    api.delete(`/api/categories/${id}`),
+};
+
+// -------------------------------------------------------
+// Webinars — Super Admin create/update/delete, all admins read
+// -------------------------------------------------------
+export const webinarService = {
+  // GET /api/webinars
+  getAll: () =>
+    api.get('/api/webinars'),
+
+  // POST /api/webinars
+  create: (data) =>
+    api.post('/api/webinars', data),
+
+  // PUT /api/webinars/:id
+  update: (id, data) =>
+    api.put(`/api/webinars/${id}`, data),
+
+  // DELETE /api/webinars/:id
+  delete: (id) =>
+    api.delete(`/api/webinars/${id}`),
+};
+
 export default api;
 

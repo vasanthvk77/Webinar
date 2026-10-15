@@ -18,6 +18,8 @@ import ModulePlaceholder   from './pages/ModulePlaceholder';
 import AdminAccounts       from './pages/admin/AdminAccounts';
 import AccessControl       from './pages/admin/AccessControl';
 import ActivityLogs        from './pages/admin/ActivityLogs';
+import Categories          from './pages/admin/Categories';
+import Webinars            from './pages/admin/Webinars';
 
 // -------------------------------------------------------
 // RoleRedirect
@@ -100,7 +102,7 @@ function AppInner() {
 
               {/* ── Webinar Management ── */}
               <Route path="dashboard"     element={<ModulePlaceholder />} />
-              <Route path="webinars"      element={<ModulePlaceholder />} />
+              <Route path="webinars"      element={<Webinars />} />
               <Route path="registrations" element={<ModulePlaceholder />} />
               <Route path="payments"      element={<ModulePlaceholder />} />
               <Route path="participants"  element={<ModulePlaceholder />} />
@@ -127,7 +129,7 @@ function AppInner() {
 
               {/* ── Master Management ── */}
               <Route path="certifications"     element={<ModulePlaceholder />} />
-              <Route path="categories"         element={<ModulePlaceholder />} />
+              <Route path="categories"         element={<Categories />} />
               <Route path="webinar-types"      element={<ModulePlaceholder />} />
               <Route path="reminders"          element={<ModulePlaceholder />} />
 

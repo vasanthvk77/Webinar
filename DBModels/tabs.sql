@@ -188,6 +188,7 @@ BEGIN
         FROM wms.Tabs t
         WHERE t.IsActive = 1 AND t.RoleId = 3
         ORDER BY t.DisplayOrder;
+        
         RETURN;
     END
 
