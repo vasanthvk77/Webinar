@@ -14,12 +14,17 @@ import SessionExpiredModal from './components/SessionExpiredModal';
 
 import Login               from './pages/Login';
 import Signup              from './pages/Signup';
+import WebinarRegistration from './pages/WebinarRegistration';
 import ModulePlaceholder   from './pages/ModulePlaceholder';
 import AdminAccounts       from './pages/admin/AdminAccounts';
 import AccessControl       from './pages/admin/AccessControl';
 import ActivityLogs        from './pages/admin/ActivityLogs';
 import Categories          from './pages/admin/Categories';
 import Webinars            from './pages/admin/Webinars';
+import Certifications      from './pages/admin/Certifications';
+import UpcomingWebinars    from './pages/student/UpcomingWebinars';
+import RegisteredWebinars  from './pages/student/RegisteredWebinars';
+import CompletedWebinars   from './pages/student/CompletedWebinars';
 
 // -------------------------------------------------------
 // RoleRedirect
@@ -64,6 +69,8 @@ function AppInner() {
             {/* ── Public routes ─────────────────────────────── */}
             <Route path="/login"  element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/register" element={<WebinarRegistration />} />
+            <Route path="/webinar-registration" element={<WebinarRegistration />} />
 
             {/* ── Student routes (RoleId = 3) ───────────────── */}
             <Route
@@ -78,9 +85,9 @@ function AppInner() {
             >
               <Route index element={<ModulePlaceholder />} />
               <Route path="profile"       element={<ModulePlaceholder />} />
-              <Route path="upcoming"      element={<ModulePlaceholder />} />
-              <Route path="registered"    element={<ModulePlaceholder />} />
-              <Route path="completed"     element={<ModulePlaceholder />} />
+              <Route path="upcoming"      element={<UpcomingWebinars />} />
+              <Route path="registered"    element={<RegisteredWebinars />} />
+              <Route path="completed"     element={<CompletedWebinars />} />
               <Route path="certificates"  element={<ModulePlaceholder />} />
               <Route path="recordings"    element={<ModulePlaceholder />} />
               <Route path="payments"      element={<ModulePlaceholder />} />
@@ -128,7 +135,7 @@ function AppInner() {
               />
 
               {/* ── Master Management ── */}
-              <Route path="certifications"     element={<ModulePlaceholder />} />
+              <Route path="certifications"     element={<Certifications />} />
               <Route path="categories"         element={<Categories />} />
               <Route path="webinar-types"      element={<ModulePlaceholder />} />
               <Route path="reminders"          element={<ModulePlaceholder />} />

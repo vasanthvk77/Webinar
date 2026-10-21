@@ -16,13 +16,13 @@ public static class DBInitializer
     // tabs.sql depends on both roles.sql and auth.sql (foreign keys to wms.Roles and wms.Users).
     private static readonly List<string> SqlFiles = new List<string>
     {
-        "../../DBModels/roles.sql",
-        "../../DBModels/auth.sql",
-        "../../DBModels/tabs.sql",
-        "../../DBModels/admin.sql",   // depends on Users, Roles, Tabs, RoleTabAccess, UserTabAccess
-        "../../DBModels/activitylog.sql",
-        "../../DBModels/categories.sql",
-        "../../DBModels/webinars.sql"
+        "../DBModels/roles.sql",
+        "../DBModels/auth.sql",
+        "../DBModels/tabs.sql",
+        "../DBModels/admin.sql",   // depends on Users, Roles, Tabs, RoleTabAccess, UserTabAccess
+        "../DBModels/activitylog.sql",
+        "../DBModels/categories.sql",
+        "../DBModels/webinars.sql"
     };
 
     // Called from Program.cs on server startup
@@ -60,11 +60,24 @@ public static class DBInitializer
         try
         {
             var projectRoot = Directory.GetCurrentDirectory();
-            var fullPath = Path.Combine(projectRoot, filePath);
+            var baseDir     = AppDomain.CurrentDomain.BaseDirectory;
 
-            if (!File.Exists(fullPath))
+            var candidates = new[]
             {
-                Log.Warning("[DBInitializer] SQL file not found, skipping: {FullPath}", fullPath);
+                Path.GetFullPath(Path.Combine(projectRoot, filePath)),
+                Path.GetFullPath(Path.Combine(projectRoot, "..", filePath)),
+                Path.GetFullPath(Path.Combine(projectRoot, "DBModels", fileName)),
+                Path.GetFullPath(Path.Combine(projectRoot, "..", "DBModels", fileName)),
+                Path.GetFullPath(Path.Combine(projectRoot, "..", "..", "DBModels", fileName)),
+                Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "DBModels", fileName)),
+                Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "DBModels", fileName))
+            };
+
+            string? fullPath = candidates.FirstOrDefault(File.Exists);
+
+            if (fullPath == null)
+            {
+                Log.Warning("[DBInitializer] SQL file not found for {FileName}, checked: {Candidates}", fileName, string.Join("; ", candidates));
                 return;
             }
 

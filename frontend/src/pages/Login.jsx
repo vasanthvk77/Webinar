@@ -133,6 +133,7 @@ const Login = () => {
 
         login(minUser, token, tabs);
         toast.success(`Welcome back, ${userData.firstName}`);
+
         navigate(getHomeRoute(userData.roleId), { replace: true });
       } else {
         setError(response.data.message || "Login failed");
@@ -171,6 +172,7 @@ const Login = () => {
 
         login(minUser, token, tabs);
         toast.success(`Welcome, ${userData.firstName}!`);
+
         navigate(getHomeRoute(userData.roleId), { replace: true });
       } else {
         setError(response.data.message || "Google login failed");

@@ -14,6 +14,8 @@ import MoreVertIcon      from '@mui/icons-material/MoreVert';
 import VideoCallIcon     from '@mui/icons-material/VideoCall';
 import TimerIcon         from '@mui/icons-material/Timer';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
+import ContentCopyIcon   from '@mui/icons-material/ContentCopy';
+import SendIcon          from '@mui/icons-material/Send';
 import toast             from 'react-hot-toast';
 import { webinarService, categoryService } from '../../services/api';
 import { useAuth }          from '../../context/AuthContext';
@@ -71,6 +73,7 @@ export default function Webinars() {
   const [formError, setFormError] = useState('');
 
   const [menu, setMenu] = useState(null);
+  const [bulkLoadingId, setBulkLoadingId] = useState(null);
 
   // Live-calculated duration shown in the read-only field
   const calculatedDuration = useMemo(
@@ -253,6 +256,55 @@ export default function Webinars() {
     } finally { setSaving(false); }
   };
 
+  // ── Share Link ─────────────────────────────────────────
+  const handleCopyShareLink = (w) => {
+    const link = `${window.location.origin}/webinar-registration?trackingId=${w.shareId || w.id}`;
+    navigator.clipboard.writeText(link);
+    toast.success('Registration link copied to clipboard!');
+  };
+
+  // ── Bulk Invite ────────────────────────────────────────
+  const handleBulkInvite = async (w) => {
+    setBulkLoadingId(w.id);
+    try {
+      const res = await webinarService.bulkInvite(w.id);
+      if (res.data?.success) {
+        // Point 1: Toast: "Invites queued successfully for X users!"
+        toast.success(res.data.message || `Invites queued successfully for ${res.data.count} users!`);
+        // Point 3: Monitor until all emails for this webinar are sent, then show confirmation snackbar!
+        startEmailStatusMonitoring(w.id, w.webinarName);
+      } else {
+        toast.error(res.data?.message || 'Failed to queue bulk invites');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Error sending bulk invites');
+    } finally {
+      setBulkLoadingId(null);
+    }
+  };
+
+  const startEmailStatusMonitoring = (webinarId, webinarName) => {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await webinarService.getEmailStatus(webinarId);
+        if (res.data?.success && res.data.isFinished) {
+          clearInterval(interval);
+          // Point 3: Confirmation snack to admin at UI like emails sent successfully
+          toast.success(`All bulk invitation emails for "${webinarName}" have been sent successfully!`, {
+            duration: 6000,
+            icon: '📨'
+          });
+        } else if (attempts >= 60) {
+          clearInterval(interval);
+        }
+      } catch {
+        clearInterval(interval);
+      }
+    }, 5000);
+  };
+
   // ── Shared styles ─────────────────────────────────────
   const inputSx = {
     '& .MuiOutlinedInput-root': {
@@ -317,7 +369,7 @@ export default function Webinars() {
             <Table>
               <TableHead>
                 <TableRow sx={{ bgcolor: colors.surfaceAlt }}>
-                  {['#', 'Webinar', 'Category', 'Date', 'Time', 'Duration', 'Conductor', 'Limit', 'Price', 'Action'].map(h => (
+                  {['#', 'Webinar', 'Category', 'Date', 'Time', 'Duration', 'Conductor', 'Limit', 'Price', 'Share & Invite', 'Action'].map(h => (
                     <TableCell key={h} sx={{ fontSize: '11px', fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', py: 1.5 }}>
                       {h}
                     </TableCell>
@@ -356,6 +408,29 @@ export default function Webinars() {
                       }
                     </TableCell>
                     <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Tooltip title="Copy Share Link">
+                          <IconButton size="small" onClick={() => handleCopyShareLink(w)} sx={{ color: colors.accent, '&:hover': { bgcolor: colors.accentMuted } }}>
+                            <ContentCopyIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Send Bulk Invite">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleBulkInvite(w)}
+                            disabled={bulkLoadingId === w.id}
+                            sx={{ color: colors.primary, '&:hover': { bgcolor: colors.surfaceAlt } }}
+                          >
+                            {bulkLoadingId === w.id ? (
+                              <CircularProgress size={16} sx={{ color: colors.primary }} />
+                            ) : (
+                              <SendIcon sx={{ fontSize: 16 }} />
+                            )}
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </TableCell>
+                    <TableCell>
                       {isSuperAdmin && (
                         <Tooltip title="Actions">
                           <IconButton size="small" onClick={e => openMenu(e, w)} sx={{ color: colors.textMuted, '&:hover': { color: colors.primary } }}>
@@ -385,6 +460,15 @@ export default function Webinars() {
             '& .MuiMenuItem-root': { fontSize: '13.5px', py: 1, px: 2, gap: 1 } },
         }}
       >
+        <MenuItem onClick={() => { closeMenu(); handleCopyShareLink(menu.row); }} sx={{ color: colors.accent }}>
+          <ListItemIcon sx={{ minWidth: 'unset' }}><ContentCopyIcon sx={{ fontSize: 16, color: colors.accent }} /></ListItemIcon>
+          Copy Share Link
+        </MenuItem>
+        <MenuItem onClick={() => { closeMenu(); handleBulkInvite(menu.row); }} sx={{ color: colors.primary }}>
+          <ListItemIcon sx={{ minWidth: 'unset' }}><SendIcon sx={{ fontSize: 16, color: colors.primary }} /></ListItemIcon>
+          Send Bulk Invite
+        </MenuItem>
+        <Divider sx={{ borderColor: colors.border, my: 0.5 }} />
         <MenuItem onClick={() => { closeMenu(); openEdit(menu.row); }} sx={{ color: colors.primary }}>
           <ListItemIcon sx={{ minWidth: 'unset' }}><EditIcon sx={{ fontSize: 16, color: colors.primary }} /></ListItemIcon>
           Edit

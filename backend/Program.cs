@@ -6,7 +6,11 @@ using System.Data;
 using Dapper;
 using WebinarApi.Database;
 using WebinarApi.Services;
+using WebinarApi.Hubs;
 using Serilog;
+using QuestPDF.Infrastructure;
+// 1. Set QuestPDF License
+QuestPDF.Settings.License = LicenseType.Community;
 
 // ── Configure Serilog before anything else ───
 Log.Logger = new LoggerConfiguration()
@@ -94,6 +98,10 @@ builder.Services.AddScoped<ITabService,    TabService>();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ICategoryService,   CategoryService>();
 builder.Services.AddScoped<IWebinarService,    WebinarService>();
+builder.Services.AddScoped<CertificateService>();
+
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<EmailQueueBackgroundService>();
 
 // -------------------------------------------------------
 // 4. Swagger (Swashbuckle)
@@ -170,5 +178,6 @@ app.UseCors("FrontendPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<UsersHub>("/hubs/users");
 
 app.Run();
