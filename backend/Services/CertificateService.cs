@@ -1,7 +1,3 @@
-
-
-
-
 using System.Text.Json;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -63,36 +59,36 @@ public static class CertificateOverlayLayoutConfig
     // ==========================================
     // 1. Certificate Number (Top Right)
     // ==========================================
-    public static float CertNumberTopPadding       = 40f;
-    public static float CertNumberRightPadding     = 52f;
-    public static float CertNumberFontSize         = 10.5f;
-    public static string CertNumberLabelColor      = "#475569";
-    public static string CertNumberValueColor      = "#0F2942";
-    public static string CertNumberPrefix          = "Certificate No: ";
+    public static float CertNumberTopPadding = 40f;
+    public static float CertNumberRightPadding = 52f;
+    public static float CertNumberFontSize = 10.5f;
+    public static string CertNumberLabelColor = "#fafafaff";
+    public static string CertNumberValueColor = "#ffffffff";
+    public static string CertNumberPrefix = "Certificate No: ";
 
     // ==========================================
     // 2. Participant Name (Center Headline)
     // ==========================================
-    public static float ParticipantNameTopPadding  = 182f;
-    public static float ParticipantNameWidth       = 580f;
-    public static float ParticipantNameHeight      = 46f;
-    public static float ParticipantNameFontSize    = 28f;
-    public static float ParticipantNameMediumFontSize = 25f;
-    public static float ParticipantNameSmallFontSize  = 22f;
-    public static string ParticipantNameColor      = "#0F2942";
-    public static bool ParticipantNameBold         = true;
+    public static float ParticipantNameTopPadding = 240f; // Moved down to rest directly on the underline
+    public static float ParticipantNameWidth = 580f;
+    public static float ParticipantNameHeight = 46f;
+    public static float ParticipantNameFontSize = 26f;
+    public static float ParticipantNameMediumFontSize = 23f;
+    public static float ParticipantNameSmallFontSize = 20f;
+    public static string ParticipantNameColor = "#0F2942";
+    public static bool ParticipantNameBold = true;
 
     // ==========================================
     // 3. Participation & Webinar Name / Date Block
     // ==========================================
-    public static float ParticipationBlockTopPadding = 4f;
-    public static float ParticipationBlockWidth      = 720f;
-    public static float ParticipationBlockHeight     = 82f;
-    public static float BodyFontSize                 = 19f;
-    public static string BodyTextColor               = "#1E293B";
-    public static string HighlightTextColor          = "#0F2942";
-    public static string MaskBackgroundColor         = "#FFFFFF";
-    public static string DateFormat                  = "d MMMM yyyy";
+    public static float ParticipationBlockTopPadding = 18f; // Moved down below the line over the placeholder text
+    public static float ParticipationBlockWidth = 720f;
+    public static float ParticipationBlockHeight = 82f;
+    public static float BodyFontSize = 13.5f; // Crisp fit over the 3-line placeholder area
+    public static string BodyTextColor = "#1E293B";
+    public static string HighlightTextColor = "#0F2942";
+    public static string MaskBackgroundColor = "#FFFFFF";
+    public static string DateFormat = "d MMMM yyyy";
 }
 
 public class CertificateService
@@ -452,6 +448,8 @@ public class CertificateService
                                 .AlignCenter()
                                 .Width(CertificateOverlayLayoutConfig.ParticipationBlockWidth)
                                 .Background(CertificateOverlayLayoutConfig.MaskBackgroundColor)
+                                .PaddingVertical(3)
+                                .PaddingHorizontal(8)
                                 .AlignCenter()
                                 .AlignMiddle()
                                 .Column(desc =>
@@ -704,6 +702,8 @@ public class CertificateService
                                     .AlignCenter()
                                     .Width(Math.Min(pageWidthPt * 0.90f, CertificateOverlayLayoutConfig.ParticipationBlockWidth))
                                     .Background(CertificateOverlayLayoutConfig.MaskBackgroundColor)
+                                    .PaddingVertical(3)
+                                    .PaddingHorizontal(8)
                                     .AlignCenter()
                                     .AlignMiddle()
                                     .Column(desc =>
