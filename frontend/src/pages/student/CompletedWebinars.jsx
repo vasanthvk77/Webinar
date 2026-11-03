@@ -249,7 +249,7 @@ export default function CompletedWebinars() {
               variant="caption"
               sx={{
                 fontWeight: 700,
-                color: 'rgba(255,255,255,0.65)',
+                color: '#fde047',
                 textTransform: 'uppercase',
                 letterSpacing: '0.6px',
                 fontSize: '0.65rem',
@@ -617,7 +617,7 @@ export default function CompletedWebinars() {
                     >
                       <Box>
                         {/* Status Line */}
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1.25, minHeight: 20 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1.0, minHeight: 20 }}>
                           {isEligible ? (
                             <>
                               <WorkspacePremiumIcon sx={{ color: '#16A34A', fontSize: 16 }} />
@@ -642,7 +642,7 @@ export default function CompletedWebinars() {
                           sx={{
                             fontWeight: 700,
                             color: colors.textPrimary,
-                            mb: 2,
+                            mb: 1,
                             lineHeight: 1.35,
                             fontSize: '1.10rem',
                             letterSpacing: '-0.25px',

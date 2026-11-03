@@ -127,6 +127,7 @@ INSERT INTO wms.Tabs (TabName, Route, DisplayOrder, RoleId) VALUES
 ('Admin Accounts',        '/admin/accounts',            20, 2),
 -- Access Control: Super Admin only — excluded from RoleTabAccess seed
 ('Access Control',        '/admin/access',              22, 2),
+('Template Builder',      '/admin/template-builder',    29, 2),
 ('Certifications',        '/admin/certifications',      30, 2),
 ('Categories',            '/admin/categories',          31, 2),
 ('Webinar Types',         '/admin/webinar-types',       32, 2),

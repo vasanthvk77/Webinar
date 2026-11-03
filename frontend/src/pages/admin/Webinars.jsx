@@ -16,8 +16,9 @@ import TimerIcon         from '@mui/icons-material/Timer';
 import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import ContentCopyIcon   from '@mui/icons-material/ContentCopy';
 import SendIcon          from '@mui/icons-material/Send';
+import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
 import toast             from 'react-hot-toast';
-import { webinarService, categoryService } from '../../services/api';
+import { webinarService, categoryService, certificateTemplateService } from '../../services/api';
 import { useAuth }          from '../../context/AuthContext';
 import { useThemeColors }   from '../../context/ThemeContext';
 import CustomSearchBar      from '../../components/CustomSearchBar';
@@ -27,6 +28,7 @@ import CustomDatePicker     from '../../components/CustomeDatePicker';
 const EMPTY_FORM = {
   webinarName:      '',
   categoryId:       '',
+  certificateTempId: '',
   webinarDate:      '',
   startTime:        '',   // "HH:mm"
   endTime:          '',   // "HH:mm"
@@ -63,6 +65,7 @@ export default function Webinars() {
   const [webinars,   setWebinars]   = useState([]);
   const [filtered,   setFiltered]   = useState([]);
   const [categories, setCategories] = useState([]);
+  const [certificateTemplates, setCertificateTemplates] = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
 
@@ -85,12 +88,14 @@ export default function Webinars() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [wRes, cRes] = await Promise.all([
+      const [wRes, cRes, tRes] = await Promise.all([
         webinarService.getAll(),
         categoryService.getAll(),
+        certificateTemplateService.getAll().catch(() => ({ data: { success: false, data: [] } })),
       ]);
       if (wRes.data.success) { setWebinars(wRes.data.data); setFiltered(wRes.data.data); }
       if (cRes.data.success)   setCategories(cRes.data.data);
+      if (tRes.data?.success)  setCertificateTemplates(tRes.data.data);
     } catch {
       toast.error('Failed to load webinars');
     } finally {
@@ -145,17 +150,18 @@ export default function Webinars() {
   const openEdit = (row) => {
     setTarget(row);
     setForm({
-      webinarName:      row.webinarName,
-      categoryId:       String(row.categoryId),
-      webinarDate:      toInputDate(row.webinarDate),
-      startTime:        toTimeOnly(row.startTime),
-      endTime:          toTimeOnly(row.endTime),
-      conductorName:    row.conductorName,
-      conductorPhone:   row.conductorPhone ?? '',
-      conductorEmail:   row.conductorEmail ?? '',
-      participantLimit: String(row.participantLimit),
-      isPaid:           row.isPaid,
-      price:            row.price != null ? String(row.price) : '',
+      webinarName:       row.webinarName,
+      categoryId:        String(row.categoryId),
+      certificateTempId: row.certificateTempId ? String(row.certificateTempId) : '',
+      webinarDate:       toInputDate(row.webinarDate),
+      startTime:         toTimeOnly(row.startTime),
+      endTime:           toTimeOnly(row.endTime),
+      conductorName:     row.conductorName,
+      conductorPhone:    row.conductorPhone ?? '',
+      conductorEmail:    row.conductorEmail ?? '',
+      participantLimit:  String(row.participantLimit),
+      isPaid:            row.isPaid,
+      price:             row.price != null ? String(row.price) : '',
     });
     setFormError('');
     setModal('edit');
@@ -187,18 +193,19 @@ export default function Webinars() {
 
     return {
       payload: {
-        webinarName:      form.webinarName.trim(),
-        categoryId:       Number(form.categoryId),
-        durationMinutes:  duration,
-        webinarDate:      form.webinarDate,
-        startTime:        startDateTime,
-        endTime:          endDateTime,
-        conductorName:    form.conductorName.trim(),
-        conductorPhone:   form.conductorPhone.trim() || null,
-        conductorEmail:   form.conductorEmail.trim() || null,
-        participantLimit: Number(form.participantLimit),
-        isPaid:           form.isPaid,
-        price:            form.isPaid ? Number(form.price) : null,
+        webinarName:       form.webinarName.trim(),
+        categoryId:        Number(form.categoryId),
+        certificateTempId: form.certificateTempId ? Number(form.certificateTempId) : null,
+        durationMinutes:   duration,
+        webinarDate:       form.webinarDate,
+        startTime:         startDateTime,
+        endTime:           endDateTime,
+        conductorName:     form.conductorName.trim(),
+        conductorPhone:    form.conductorPhone.trim() || null,
+        conductorEmail:    form.conductorEmail.trim() || null,
+        participantLimit:  Number(form.participantLimit),
+        isPaid:            form.isPaid,
+        price:             form.isPaid ? Number(form.price) : null,
       }
     };
   };
@@ -390,7 +397,21 @@ export default function Webinars() {
                         </Typography>
                       </Box>
                     </TableCell>
-                    <TableCell sx={{ fontSize: '13px', color: colors.textSecondary }}>{w.categoryName}</TableCell>
+                    <TableCell>
+                      <Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>{w.categoryName}</Typography>
+                      {w.certificateTemplateName ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.4 }}>
+                          <WorkspacePremiumIcon sx={{ fontSize: 13, color: colors.accent }} />
+                          <Typography sx={{ fontSize: '11px', color: colors.accent, fontWeight: 500 }} noWrap>
+                            {w.certificateTemplateName}
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Typography sx={{ fontSize: '10.5px', color: colors.textMuted, mt: 0.4 }}>
+                          Default Certificate
+                        </Typography>
+                      )}
+                    </TableCell>
                     <TableCell sx={{ fontSize: '12px', color: colors.textMuted }}>{toISOLocal(w.webinarDate)}</TableCell>
                     <TableCell sx={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
                       {fmtTime(w.startTime)} – {fmtTime(w.endTime)}
@@ -535,8 +556,47 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row 2 — Webinar Date + Participant Limit */}
+          {/* Row 2 — Certificate Template + Webinar Date + Participant Limit */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Box sx={{ flex: 1.2 }}>
+              <Label text="Certificate Template" />
+              <TextField fullWidth size="small" select value={form.certificateTempId}
+                onChange={e => setField('certificateTempId', e.target.value)} sx={inputSx}
+                SelectProps={{
+                  displayEmpty: true,
+                  renderValue: (selected) => {
+                    if (!selected) {
+                      return (
+                        <Typography sx={{ fontSize: '13px', color: colors.textMuted }}>
+                          Select certificate template
+                        </Typography>
+                      );
+                    }
+                    const found = certificateTemplates.find(t => String(t.id) === String(selected));
+                    return found ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <WorkspacePremiumIcon sx={{ fontSize: 16, color: colors.accent }} />
+                        <Typography sx={{ fontSize: '13px' }}>{found.certificateName}</Typography>
+                      </Box>
+                    ) : selected;
+                  }
+                }}
+              >
+                <MenuItem value="">
+                  <Typography sx={{ fontSize: '13px', color: colors.textMuted, fontStyle: 'italic' }}>
+                    None (Default Certificate)
+                  </Typography>
+                </MenuItem>
+                {certificateTemplates.map(t => (
+                  <MenuItem key={t.id} value={String(t.id)}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <WorkspacePremiumIcon sx={{ fontSize: 16, color: colors.accent }} />
+                      <Typography sx={{ fontSize: '13px', fontWeight: 500 }}>{t.certificateName}</Typography>
+                    </Box>
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Box>
             <Box sx={{ flex: 1 }}>
               <CustomDatePicker
                 label="Webinar Date"
@@ -546,7 +606,7 @@ export default function Webinars() {
                 inputStyle={inputSx}
               />
             </Box>
-            <Box sx={{ flex: 1 }}>
+            <Box sx={{ flex: 0.9 }}>
               <Label text="Participant Limit" required />
               <TextField fullWidth size="small" type="number" placeholder="e.g. 100"
                 value={form.participantLimit} onChange={e => setField('participantLimit', e.target.value)}

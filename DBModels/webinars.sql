@@ -40,6 +40,9 @@ BEGIN
         Price            FLOAT NULL,
         ShareId          NVARCHAR(64) NOT NULL
             CONSTRAINT DF_Webinars_ShareId DEFAULT LOWER(CONVERT(NVARCHAR(36), NEWID())),
+        CertificateTempId INT NULL
+            CONSTRAINT FK_Webinars_CertificateTemplates
+                FOREIGN KEY REFERENCES wms.CertificateTemplates(Id) ON DELETE SET NULL,
         CreatedAt        DATETIME2(0) NOT NULL
             CONSTRAINT DF_Webinars_CreatedAt DEFAULT GETDATE(),
         CreatedBy        INT NULL
@@ -52,6 +55,20 @@ BEGIN
         CONSTRAINT CK_Webinars_EndTime CHECK (EndTime > StartTime),
         CONSTRAINT CK_Webinars_Price   CHECK (IsPaid = 0 OR Price > 0)
     );
+END
+GO
+
+-- Ensure CertificateTempId column exists for existing tables
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Webinars' AND s.name = 'wms' AND c.name = 'CertificateTempId'
+)
+BEGIN
+    ALTER TABLE wms.Webinars ADD CertificateTempId INT NULL
+        CONSTRAINT FK_Webinars_CertificateTemplates
+            FOREIGN KEY REFERENCES wms.CertificateTemplates(Id) ON DELETE SET NULL;
 END
 GO
 
@@ -187,6 +204,8 @@ BEGIN
         w.IsPaid,
         w.Price,
         w.ShareId,
+        w.CertificateTempId,
+        ct.CertificateName AS CertificateTemplateName,
         w.CreatedAt,
         w.CreatedBy,
         uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
@@ -196,6 +215,7 @@ BEGIN
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount
     FROM wms.Webinars w
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
     LEFT JOIN wms.Users uu ON uu.Id = w.UpdatedBy
     ORDER BY w.WebinarDate DESC, w.StartTime DESC;
@@ -232,9 +252,12 @@ BEGIN
         w.IsPaid,
         w.Price,
         w.ShareId,
+        w.CertificateTempId,
+        ct.CertificateName AS CertificateTemplateName,
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount
     FROM wms.Webinars w
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     WHERE w.ShareId = @ShareId;
 END
 GO
@@ -261,7 +284,8 @@ CREATE PROCEDURE wms.usp_CreateWebinar
     @IsPaid           BIT,
     @Price            FLOAT,
     @CreatedBy        INT,
-    @ShareId          NVARCHAR(64) = NULL
+    @ShareId          NVARCHAR(64) = NULL,
+    @CertificateTempId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -290,11 +314,11 @@ BEGIN
     INSERT INTO wms.Webinars
         (WebinarName, CategoryId, DurationMinutes, WebinarDate, StartTime, EndTime,
          ConductorName, ConductorPhone, ConductorEmail, ParticipantLimit,
-         IsPaid, Price, CreatedBy, ShareId)
+         IsPaid, Price, CreatedBy, ShareId, CertificateTempId)
     VALUES
         (@WebinarName, @CategoryId, @DurationMinutes, @WebinarDate, @StartTime, @EndTime,
          @ConductorName, @ConductorPhone, @ConductorEmail, @ParticipantLimit,
-         @IsPaid, CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END, @CreatedBy, @ShareId);
+         @IsPaid, CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END, @CreatedBy, @ShareId, @CertificateTempId);
 
     DECLARE @NewId BIGINT = SCOPE_IDENTITY();
 
@@ -314,6 +338,8 @@ BEGIN
         w.IsPaid,
         w.Price,
         w.ShareId,
+        w.CertificateTempId,
+        ct.CertificateName AS CertificateTemplateName,
         w.CreatedAt,
         w.CreatedBy,
         uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
@@ -323,6 +349,7 @@ BEGIN
         0 AS RegistrationCount
     FROM wms.Webinars w
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
     WHERE w.Id = @NewId;
 END
@@ -350,7 +377,8 @@ CREATE PROCEDURE wms.usp_UpdateWebinar
     @ParticipantLimit INT,
     @IsPaid           BIT,
     @Price            FLOAT,
-    @UpdatedBy        INT
+    @UpdatedBy        INT,
+    @CertificateTempId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -381,20 +409,21 @@ BEGIN
 
     UPDATE wms.Webinars
     SET
-        WebinarName      = @WebinarName,
-        CategoryId       = @CategoryId,
-        DurationMinutes  = @DurationMinutes,
-        WebinarDate      = @WebinarDate,
-        StartTime        = @StartTime,
-        EndTime          = @EndTime,
-        ConductorName    = @ConductorName,
-        ConductorPhone   = @ConductorPhone,
-        ConductorEmail   = @ConductorEmail,
-        ParticipantLimit = @ParticipantLimit,
-        IsPaid           = @IsPaid,
-        Price            = CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END,
-        UpdatedAt        = GETDATE(),
-        UpdatedBy        = @UpdatedBy
+        WebinarName       = @WebinarName,
+        CategoryId        = @CategoryId,
+        DurationMinutes   = @DurationMinutes,
+        WebinarDate       = @WebinarDate,
+        StartTime         = @StartTime,
+        EndTime           = @EndTime,
+        ConductorName     = @ConductorName,
+        ConductorPhone    = @ConductorPhone,
+        ConductorEmail    = @ConductorEmail,
+        ParticipantLimit  = @ParticipantLimit,
+        IsPaid            = @IsPaid,
+        Price             = CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END,
+        CertificateTempId = @CertificateTempId,
+        UpdatedAt         = GETDATE(),
+        UpdatedBy         = @UpdatedBy
     WHERE Id = @Id;
 
     SELECT
@@ -413,6 +442,8 @@ BEGIN
         w.IsPaid,
         w.Price,
         w.ShareId,
+        w.CertificateTempId,
+        ct.CertificateName AS CertificateTemplateName,
         w.CreatedAt,
         w.CreatedBy,
         uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
@@ -422,6 +453,7 @@ BEGIN
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount
     FROM wms.Webinars w
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
     LEFT JOIN wms.Users uu ON uu.Id = w.UpdatedBy
     WHERE w.Id = @Id;
@@ -711,6 +743,8 @@ BEGIN
             w.IsPaid,
             w.Price,
             w.ShareId,
+            w.CertificateTempId,
+            ct.CertificateName AS CertificateTemplateName,
             w.CreatedAt,
             w.CreatedBy,
             uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
@@ -722,6 +756,7 @@ BEGIN
             wr.Id AS RegistrationId
         FROM wms.Webinars w
         JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+        LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
         LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
         LEFT JOIN wms.WebinarRegistrations wr ON wr.WebinarId = w.Id AND wr.UserId = @StudentId
         ORDER BY w.WebinarDate ASC, w.StartTime ASC;
@@ -765,6 +800,8 @@ BEGIN
             w.IsPaid,
             w.Price,
             w.ShareId,
+            w.CertificateTempId,
+            ct.CertificateName AS CertificateTemplateName,
             w.CreatedAt,
             w.CreatedBy,
             uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
@@ -777,6 +814,7 @@ BEGIN
         FROM wms.WebinarRegistrations wr
         JOIN wms.Webinars w ON w.Id = wr.WebinarId
         JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+        LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
         LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
         WHERE wr.UserId = @StudentId
         ORDER BY wr.CreatedDateTime DESC;
@@ -882,6 +920,9 @@ BEGIN
         w.ConductorName,
         w.ConductorEmail,
         w.ShareId,
+        w.CertificateTempId,
+        ct.CertificateName AS CertificateTemplateName,
+        ct.TemplateImageUrl,
         wr.Id AS WebinarRegisterId,
         wr.CreatedDateTime AS RegisteredAt,
         wc.Id AS CompletedId,
@@ -906,6 +947,7 @@ BEGIN
     INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
     INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
     INNER JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     INNER JOIN wms.Users u ON u.Id = wr.UserId
     WHERE wr.UserId = @UserId
       AND wc.IsAttended = 1 -- Condition 2: Completed webinar

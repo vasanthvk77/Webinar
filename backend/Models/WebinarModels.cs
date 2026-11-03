@@ -18,6 +18,7 @@ public class CreateWebinarRequest
     public bool     IsPaid           { get; set; }
     public double?  Price            { get; set; }
     public string?  ShareId          { get; set; }
+    public int?     CertificateTempId { get; set; }
 }
 
 // -------------------------------------------------------
@@ -37,6 +38,7 @@ public class UpdateWebinarRequest
     public int      ParticipantLimit { get; set; }
     public bool     IsPaid           { get; set; }
     public double?  Price            { get; set; }
+    public int?     CertificateTempId { get; set; }
 }
 
 // -------------------------------------------------------
@@ -60,6 +62,8 @@ public class WebinarDto
     public bool      IsPaid            { get; set; }
     public double?   Price             { get; set; }
     public string    ShareId           { get; set; } = string.Empty;
+    public int?      CertificateTempId { get; set; }
+    public string?   CertificateTemplateName { get; set; }
     public int       RegistrationCount { get; set; }
     public DateTime  CreatedAt         { get; set; }
     public int?      CreatedBy         { get; set; }
@@ -149,5 +153,8 @@ public class CompletedWebinarDto
     public bool      CanDownloadCertificate { get; set; }
     public string    ParticipantName        { get; set; } = string.Empty;
     public string    CertificateId          { get; set; } = string.Empty;
+    public int?      CertificateTempId      { get; set; }
+    public string?   CertificateTemplateName { get; set; }
+    public string?   TemplateImageUrl        { get; set; }
 }
 

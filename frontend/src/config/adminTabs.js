@@ -23,6 +23,7 @@ import VideoLibraryIcon       from '@mui/icons-material/VideoLibrary';
 import ManageAccountsIcon     from '@mui/icons-material/ManageAccounts';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CardMembershipIcon     from '@mui/icons-material/CardMembership';
+import DesignServicesIcon    from '@mui/icons-material/DesignServices';
 import CategoryIcon           from '@mui/icons-material/Category';
 import TypeSpecimenIcon       from '@mui/icons-material/TypeSpecimen';
 import AlarmIcon              from '@mui/icons-material/Alarm';
@@ -68,7 +69,8 @@ const adminTabs = [
     route: '/admin/master',       // virtual — no page, toggles dropdown
     icon: LibraryBooksIcon,
     children: [
-      { label: 'Certificate Template',         route: '/admin/certifications', icon: CardMembershipIcon },
+      { label: 'Template Builder',       route: '/admin/template-builder', icon: DesignServicesIcon },
+      { label: 'Certificate Template',   route: '/admin/certifications',   icon: CardMembershipIcon },
       { label: 'Categories',             route: '/admin/categories',     icon: CategoryIcon },
       { label: 'Webinar Types',          route: '/admin/webinar-types',  icon: TypeSpecimenIcon },
       { label: 'Reminder Configuration', route: '/admin/reminders',      icon: AlarmIcon },

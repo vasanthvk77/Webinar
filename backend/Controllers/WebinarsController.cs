@@ -114,7 +114,9 @@ public class WebinarsController : ControllerBase
         if (!item.CanDownloadCertificate)
             return Forbid();
 
-        string templateId = "CertificateTemplate1";
+        string templateId = (item.CertificateTempId.HasValue && item.CertificateTempId.Value > 0)
+            ? item.CertificateTempId.Value.ToString()
+            : "CertificateTemplate1";
         var req = new CertificateRequest(
             item.ParticipantName,
             item.WebinarName,

@@ -99,6 +99,7 @@ builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ICategoryService,   CategoryService>();
 builder.Services.AddScoped<IWebinarService,    WebinarService>();
 builder.Services.AddScoped<CertificateService>();
+builder.Services.AddScoped<ICertificateTemplateService, CertificateTemplateService>();
 
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<EmailQueueBackgroundService>();

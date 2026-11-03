@@ -183,7 +183,8 @@ namespace WebinarApi.Services
                         IsPaid           = req.IsPaid,
                         Price            = req.IsPaid ? req.Price : (double?)null,
                         CreatedBy        = createdBy,
-                        ShareId          = string.IsNullOrWhiteSpace(req.ShareId) ? null : req.ShareId.Trim()
+                        ShareId          = string.IsNullOrWhiteSpace(req.ShareId) ? null : req.ShareId.Trim(),
+                        CertificateTempId = req.CertificateTempId
                     },
                     commandType: CommandType.StoredProcedure
                 );
@@ -246,7 +247,8 @@ namespace WebinarApi.Services
                         ParticipantLimit = req.ParticipantLimit,
                         IsPaid           = req.IsPaid,
                         Price            = req.IsPaid ? req.Price : (double?)null,
-                        UpdatedBy        = updatedBy
+                        UpdatedBy        = updatedBy,
+                        CertificateTempId = req.CertificateTempId
                     },
                     commandType: CommandType.StoredProcedure
                 );

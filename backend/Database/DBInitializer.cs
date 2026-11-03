@@ -22,6 +22,7 @@ public static class DBInitializer
         "../DBModels/admin.sql",   // depends on Users, Roles, Tabs, RoleTabAccess, UserTabAccess
         "../DBModels/activitylog.sql",
         "../DBModels/categories.sql",
+        "../DBModels/certificatetemplates.sql",
         "../DBModels/webinars.sql"
     };
 

@@ -22,9 +22,11 @@ import ActivityLogs        from './pages/admin/ActivityLogs';
 import Categories          from './pages/admin/Categories';
 import Webinars            from './pages/admin/Webinars';
 import Certifications      from './pages/admin/Certifications';
+import TemplateBuilder    from './pages/admin/TemplateBuilder';
 import UpcomingWebinars    from './pages/student/UpcomingWebinars';
 import RegisteredWebinars  from './pages/student/RegisteredWebinars';
 import CompletedWebinars   from './pages/student/CompletedWebinars';
+import MyCertificates      from './pages/student/MyCertificates';
 
 // -------------------------------------------------------
 // RoleRedirect
@@ -88,7 +90,7 @@ function AppInner() {
               <Route path="upcoming"      element={<UpcomingWebinars />} />
               <Route path="registered"    element={<RegisteredWebinars />} />
               <Route path="completed"     element={<CompletedWebinars />} />
-              <Route path="certificates"  element={<ModulePlaceholder />} />
+              <Route path="certificates"  element={<MyCertificates />} />
               <Route path="recordings"    element={<ModulePlaceholder />} />
               <Route path="payments"      element={<ModulePlaceholder />} />
               <Route path="notifications" element={<ModulePlaceholder />} />
@@ -136,6 +138,7 @@ function AppInner() {
 
               {/* ── Master Management ── */}
               <Route path="certifications"     element={<Certifications />} />
+              <Route path="template-builder"   element={<TemplateBuilder />} />
               <Route path="categories"         element={<Categories />} />
               <Route path="webinar-types"      element={<ModulePlaceholder />} />
               <Route path="reminders"          element={<ModulePlaceholder />} />

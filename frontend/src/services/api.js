@@ -262,6 +262,10 @@ export const certificateService = {
   getTemplates: () =>
     api.get('/api/certificates/templates'),
 
+  // GET /api/certificates/templates/:id/preview — authenticated image blob
+  getPreview: (templateId) =>
+    api.get(`/api/certificates/templates/${templateId}/preview`, { responseType: 'blob' }),
+
   // GET /api/certificates/templates/:id/download — blob PDF
   downloadPdf: (templateId, params = {}) =>
     api.get(`/api/certificates/templates/${templateId}/download`, {
@@ -274,6 +278,41 @@ export const certificateService = {
     api.post(`/api/certificates/templates/${templateId}/generate`, data, {
       responseType: 'blob'
     }),
+};
+
+// -------------------------------------------------------
+// Visual Certificate Template Builder — Admin management
+// -------------------------------------------------------
+export const certificateTemplateService = {
+  // GET /api/certificate-templates
+  getAll: () =>
+    api.get('/api/certificate-templates'),
+
+  // GET /api/certificate-templates/:id
+  getById: (id) =>
+    api.get(`/api/certificate-templates/${id}`),
+
+  // POST /api/certificate-templates
+  create: (data) =>
+    api.post('/api/certificate-templates', data),
+
+  // PUT /api/certificate-templates/:id
+  update: (id, data) =>
+    api.put(`/api/certificate-templates/${id}`, data),
+
+  // DELETE /api/certificate-templates/:id
+  delete: (id) =>
+    api.delete(`/api/certificate-templates/${id}`),
+
+  // POST /api/certificate-templates/upload-image
+  uploadImage: (formData) =>
+    api.post('/api/certificate-templates/upload-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+
+  // DELETE /api/certificate-templates/images?fileName=:fileName
+  deleteImage: (fileName) =>
+    api.delete(`/api/certificate-templates/images?fileName=${encodeURIComponent(fileName)}`),
 };
 
 export default api;
