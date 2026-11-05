@@ -94,6 +94,27 @@ public class WebinarsController : ControllerBase
     }
 
     // -------------------------------------------------------
+    // GET /api/webinars/participants — Admin view participants from wms.WebinarCompleted
+    // Super Admin & Admin only (RoleId = 1 or 2)
+    // -------------------------------------------------------
+    [HttpGet("participants")]
+    public async Task<IActionResult> GetParticipants([FromQuery] long? webinarId = null)
+    {
+        _logger.LogInformation("[WebinarsController] GET /api/webinars/participants — CallerUserId: {UserId}, RoleId: {RoleId}, WebinarId: {WebinarId}",
+            CallerUserId, CallerRoleId, webinarId);
+
+        if (CallerRoleId != 1 && CallerRoleId != 2)
+        {
+            _logger.LogWarning("[WebinarsController] GetParticipants FORBIDDEN — CallerUserId: {UserId}, RoleId: {RoleId}",
+                CallerUserId, CallerRoleId);
+            return Forbid();
+        }
+
+        var participants = await _webinarService.GetParticipantsAsync(webinarId);
+        return Ok(new { success = true, data = participants });
+    }
+
+    // -------------------------------------------------------
     // GET /api/webinars/{id}/certificate/download — Condition 3: Certificate Download
     // Strict Verification: Checks if student is eligible for certificate before streaming PDF
     // -------------------------------------------------------

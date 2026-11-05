@@ -19,7 +19,7 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
     .MinimumLevel.Override("System", Serilog.Events.LogEventLevel.Warning)
     .WriteTo.Console(
-        restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning,
+        restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information,
         outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
     .WriteTo.File(
         path: "Logs/app-.log",
@@ -98,11 +98,19 @@ builder.Services.AddScoped<ITabService,    TabService>();
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<ICategoryService,   CategoryService>();
 builder.Services.AddScoped<IWebinarService,    WebinarService>();
+builder.Services.AddScoped<IMeetingService,    MeetingService>();
 builder.Services.AddScoped<CertificateService>();
 builder.Services.AddScoped<ICertificateTemplateService, CertificateTemplateService>();
+builder.Services.AddScoped<IDashboardService, DashboardService>();
 
 builder.Services.AddSignalR();
+builder.Services.AddHttpClient("BbbClient")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+    });
 builder.Services.AddHostedService<EmailQueueBackgroundService>();
+builder.Services.AddHostedService<MeetingScheduleChecker>();
 
 // -------------------------------------------------------
 // 4. Swagger (Swashbuckle)

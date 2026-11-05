@@ -32,35 +32,11 @@ import { webinarService } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useThemeColors } from '../../context/ThemeContext';
 import CustomSearchBar from '../../components/CustomSearchBar';
+import { formatUtcToLocalDateOnly, formatUtcToLocalTimeOnly } from '../../utils/validation';
 
-const formatDate = (dateStr) => {
-  if (!dateStr) return '—';
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  } catch {
-    return dateStr;
-  }
-};
+const formatDate = (dateStr) => formatUtcToLocalDateOnly(dateStr);
 
-const formatTime = (timeStr) => {
-  if (!timeStr) return '—';
-  try {
-    const d = new Date(timeStr);
-    return d.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  } catch {
-    return timeStr;
-  }
-};
+const formatTime = (timeStr) => formatUtcToLocalTimeOnly(timeStr);
 
 const fmtDuration = (mins) => {
   if (!mins || mins <= 0) return '—';

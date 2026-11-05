@@ -1301,3 +1301,383 @@ END;
 GO
 PRINT '[SUCCESS] Created wms.usp_GetAuditActorDetails';
 GO
+
+
+
+
+-- =============================================
+-- Categories Master Table + Stored Procedures
+-- Depends on: auth.sql (wms.Users for CreatedBy FK)
+-- Run order in DBInitializer: after admin.sql
+-- All SPs are DROP+CREATE (idempotent on every server start)
+-- =============================================
+
+USE webinar;
+GO
+
+-- ============================================================
+-- TABLE: wms.WebinarCategories
+-- ============================================================
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'WebinarCategories' AND s.name = 'wms'
+)
+BEGIN
+    CREATE TABLE wms.WebinarCategories
+    (
+        Id           INT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_WebinarCategories PRIMARY KEY,
+        CategoryName NVARCHAR(100) NOT NULL
+            CONSTRAINT UQ_WebinarCategories_CategoryName UNIQUE,
+        CreatedBy    INT NOT NULL
+            CONSTRAINT FK_WebinarCategories_CreatedBy FOREIGN KEY REFERENCES wms.Users(Id),
+        CreatedAt    DATETIME2(0) NOT NULL
+            CONSTRAINT DF_WebinarCategories_CreatedAt DEFAULT GETDATE(),
+        UpdatedBy    INT NULL
+            CONSTRAINT FK_WebinarCategories_UpdatedBy FOREIGN KEY REFERENCES wms.Users(Id),
+        UpdatedAt    DATETIME2(0) NULL
+    );
+END
+ELSE
+BEGIN
+    -- Add UpdatedBy / UpdatedAt columns if the table already exists (migration guard)
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('wms.WebinarCategories') AND name = 'UpdatedBy')
+        ALTER TABLE wms.WebinarCategories ADD UpdatedBy INT NULL
+            CONSTRAINT FK_WebinarCategories_UpdatedBy FOREIGN KEY REFERENCES wms.Users(Id);
+
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('wms.WebinarCategories') AND name = 'UpdatedAt')
+        ALTER TABLE wms.WebinarCategories ADD UpdatedAt DATETIME2(0) NULL;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetAllCategories
+-- Purpose : Return all categories ordered by name.
+-- Used by : CategoriesController GET /api/categories
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetAllCategories' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetAllCategories;
+GO
+
+CREATE PROCEDURE wms.usp_GetAllCategories
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        c.Id,
+        c.CategoryName,
+        c.CreatedBy,
+        uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
+        c.CreatedAt,
+        c.UpdatedBy,
+        uu.FirstName + ISNULL(' ' + uu.LastName, '') AS UpdatedByName,
+        c.UpdatedAt
+    FROM wms.WebinarCategories c
+    JOIN wms.Users uc ON uc.Id = c.CreatedBy
+    LEFT JOIN wms.Users uu ON uu.Id = c.UpdatedBy
+    ORDER BY c.CategoryName ASC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_CreateCategory
+-- Purpose : Insert a new category. Returns the new row.
+--           Fails with a descriptive error if name already exists.
+-- Used by : CategoriesController POST /api/categories
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_CreateCategory' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_CreateCategory;
+GO
+
+CREATE PROCEDURE wms.usp_CreateCategory
+    @CategoryName NVARCHAR(100),
+    @CreatedBy    INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Duplicate check (case-insensitive)
+    IF EXISTS (
+        SELECT 1 FROM wms.WebinarCategories
+        WHERE LOWER(CategoryName) = LOWER(@CategoryName)
+    )
+    BEGIN
+        RAISERROR('A category with this name already exists.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO wms.WebinarCategories (CategoryName, CreatedBy)
+    VALUES (@CategoryName, @CreatedBy);
+
+    -- Return the newly created row
+    SELECT
+        c.Id,
+        c.CategoryName,
+        c.CreatedBy,
+        uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
+        c.CreatedAt,
+        c.UpdatedBy,
+        NULL AS UpdatedByName,
+        c.UpdatedAt
+    FROM wms.WebinarCategories c
+    JOIN wms.Users uc ON uc.Id = c.CreatedBy
+    WHERE c.Id = SCOPE_IDENTITY();
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_UpdateCategory
+-- Purpose : Rename a category. Duplicate name check excluded
+--           for the same row. Returns the updated row.
+-- Used by : CategoriesController PUT /api/categories/{id}
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_UpdateCategory' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_UpdateCategory;
+GO
+
+CREATE PROCEDURE wms.usp_UpdateCategory
+    @Id           INT,
+    @CategoryName NVARCHAR(100),
+    @UpdatedBy    INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM wms.WebinarCategories WHERE Id = @Id)
+    BEGIN
+        RAISERROR('Category not found.', 16, 1);
+        RETURN;
+    END
+
+    -- Duplicate check: same name used by a *different* row
+    IF EXISTS (
+        SELECT 1 FROM wms.WebinarCategories
+        WHERE LOWER(CategoryName) = LOWER(@CategoryName)
+          AND Id <> @Id
+    )
+    BEGIN
+        RAISERROR('A category with this name already exists.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE wms.WebinarCategories
+    SET
+        CategoryName = @CategoryName,
+        UpdatedBy    = @UpdatedBy,
+        UpdatedAt    = GETDATE()
+    WHERE Id = @Id;
+
+    -- Return the updated row
+    SELECT
+        c.Id,
+        c.CategoryName,
+        c.CreatedBy,
+        uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
+        c.CreatedAt,
+        c.UpdatedBy,
+        uu.FirstName + ISNULL(' ' + uu.LastName, '') AS UpdatedByName,
+        c.UpdatedAt
+    FROM wms.WebinarCategories c
+    JOIN wms.Users uc ON uc.Id = c.CreatedBy
+    LEFT JOIN wms.Users uu ON uu.Id = c.UpdatedBy
+    WHERE c.Id = @Id;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_DeleteCategory
+-- Purpose : Hard-delete a category by Id.
+-- Used by : CategoriesController DELETE /api/categories/{id}
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_DeleteCategory' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_DeleteCategory;
+GO
+
+CREATE PROCEDURE wms.usp_DeleteCategory
+    @Id        INT,
+    @DeletedBy INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM wms.WebinarCategories WHERE Id = @Id)
+    BEGIN
+        RAISERROR('Category not found.', 16, 1);
+        RETURN;
+    END
+
+    DELETE FROM wms.WebinarCategories WHERE Id = @Id;
+
+    SELECT 1 AS Deleted;
+END
+GO
+
+
+
+
+-- =============================================
+-- CertificateTemplates Table & Stored Procedures
+-- Schema for Visual Certificate Template Builder
+-- =============================================
+
+USE webinar;
+GO
+
+-- 1. Table: wms.CertificateTemplates
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'CertificateTemplates' AND s.name = 'wms'
+)
+BEGIN
+    CREATE TABLE wms.CertificateTemplates (
+        Id                  INT IDENTITY(1,1) PRIMARY KEY,
+        CertificateName     VARCHAR(100) NOT NULL,
+        TemplateImageUrl    NVARCHAR(500) NOT NULL,
+        LogoCount           INT NOT NULL DEFAULT 0,
+        LogoConfiguration   NVARCHAR(MAX) NULL,   -- JSON containing templateWidth, templateHeight, and logoSlots
+        IsActive            BIT NOT NULL DEFAULT 1,
+        CreatedBy           INT NULL CONSTRAINT FK_CertificateTemplates_Users FOREIGN KEY REFERENCES wms.Users(Id),
+        CreatedAt           DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        UpdatedAt           DATETIME2 NULL
+    );
+    PRINT '[SUCCESS] Created wms.CertificateTemplates table';
+END
+ELSE
+BEGIN
+    PRINT '[INFO] wms.CertificateTemplates table already exists';
+END
+GO
+
+-- 2. SP: wms.usp_GetCertificateTemplates
+-- Returns all active templates with creator details
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetCertificateTemplates' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetCertificateTemplates;
+GO
+
+CREATE PROCEDURE wms.usp_GetCertificateTemplates
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        ct.Id,
+        ct.CertificateName,
+        ct.TemplateImageUrl,
+        ct.LogoCount,
+        ct.LogoConfiguration,
+        ct.IsActive,
+        ct.CreatedBy,
+        u.FirstName + ISNULL(' ' + u.LastName, '') AS CreatedByName,
+        ct.CreatedAt,
+        ct.UpdatedAt
+    FROM wms.CertificateTemplates ct
+    LEFT JOIN wms.Users u ON u.Id = ct.CreatedBy
+    WHERE ct.IsActive = 1
+    ORDER BY ct.Id DESC;
+END
+GO
+
+-- 3. SP: wms.usp_GetCertificateTemplateById
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetCertificateTemplateById' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetCertificateTemplateById;
+GO
+
+CREATE PROCEDURE wms.usp_GetCertificateTemplateById
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        ct.Id,
+        ct.CertificateName,
+        ct.TemplateImageUrl,
+        ct.LogoCount,
+        ct.LogoConfiguration,
+        ct.IsActive,
+        ct.CreatedBy,
+        u.FirstName + ISNULL(' ' + u.LastName, '') AS CreatedByName,
+        ct.CreatedAt,
+        ct.UpdatedAt
+    FROM wms.CertificateTemplates ct
+    LEFT JOIN wms.Users u ON u.Id = ct.CreatedBy
+    WHERE ct.Id = @Id;
+END
+GO
+
+-- 4. SP: wms.usp_UpsertCertificateTemplate
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_UpsertCertificateTemplate' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_UpsertCertificateTemplate;
+GO
+
+CREATE PROCEDURE wms.usp_UpsertCertificateTemplate
+    @Id                INT = 0,
+    @CertificateName   VARCHAR(100),
+    @TemplateImageUrl  NVARCHAR(500),
+    @LogoCount         INT,
+    @LogoConfiguration NVARCHAR(MAX),
+    @UserId            INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Id > 0 AND EXISTS (SELECT 1 FROM wms.CertificateTemplates WHERE Id = @Id)
+    BEGIN
+        UPDATE wms.CertificateTemplates
+        SET
+            CertificateName   = @CertificateName,
+            TemplateImageUrl  = @TemplateImageUrl,
+            LogoCount         = @LogoCount,
+            LogoConfiguration = @LogoConfiguration,
+            UpdatedAt         = SYSUTCDATETIME()
+        WHERE Id = @Id;
+
+        SELECT @Id AS TemplateId, 'Certificate template updated successfully.' AS Message;
+    END
+    ELSE
+    BEGIN
+        INSERT INTO wms.CertificateTemplates (
+            CertificateName,
+            TemplateImageUrl,
+            LogoCount,
+            LogoConfiguration,
+            IsActive,
+            CreatedBy,
+            CreatedAt
+        )
+        VALUES (
+            @CertificateName,
+            @TemplateImageUrl,
+            @LogoCount,
+            @LogoConfiguration,
+            1,
+            @UserId,
+            SYSUTCDATETIME()
+        );
+
+        SELECT SCOPE_IDENTITY() AS TemplateId, 'Certificate template created successfully.' AS Message;
+    END
+END
+GO
+
+-- 5. SP: wms.usp_DeleteCertificateTemplate
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_DeleteCertificateTemplate' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_DeleteCertificateTemplate;
+GO
+
+CREATE PROCEDURE wms.usp_DeleteCertificateTemplate
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.CertificateTemplates
+    SET IsActive = 0, UpdatedAt = SYSUTCDATETIME()
+    WHERE Id = @Id;
+
+    SELECT 1 AS Success, 'Certificate template deleted successfully.' AS Message;
+END
+GO

@@ -18,6 +18,7 @@ namespace WebinarApi.Services
         Task<(bool isFinished, int total, int pending, string? webinarName)> GetEmailQueueStatusAsync(long webinarId);
         Task<CheckEmailResultDto>                                        CheckEmailAsync(string email);
         Task<IEnumerable<CompletedWebinarDto>>                           GetCompletedWebinarsAsync(int userId, long? webinarId = null);
+        Task<IEnumerable<WebinarParticipantDto>>                         GetParticipantsAsync(long? webinarId = null);
     }
 
     public class WebinarService : IWebinarService
@@ -89,7 +90,7 @@ namespace WebinarApi.Services
 
         // -------------------------------------------------------
         // Certificate Eligibility & Completed Webinars Check
-        // Calls: dbo.certificateEligibilityCheck
+        // Calls: wms.certificateEligibilityCheck
         // -------------------------------------------------------
         public async Task<IEnumerable<CompletedWebinarDto>> GetCompletedWebinarsAsync(int userId, long? webinarId = null)
         {
@@ -98,7 +99,7 @@ namespace WebinarApi.Services
             {
                 using var conn = new SqlConnection(_connectionString);
                 var rows = await conn.QueryAsync<CompletedWebinarDto>(
-                    "dbo.certificateEligibilityCheck",
+                    "wms.certificateEligibilityCheck",
                     new
                     {
                         UserId    = userId,
@@ -114,6 +115,31 @@ namespace WebinarApi.Services
             {
                 _logger.LogError(ex, "[Webinar] GetCompletedWebinarsAsync EXCEPTION for UserId: {UserId}: {Message}", userId, ex.Message);
                 return Enumerable.Empty<CompletedWebinarDto>();
+            }
+        }
+
+        // -------------------------------------------------------
+        // Admin View Participants (Calls: wms.sp_AdminViewParticipants)
+        // -------------------------------------------------------
+        public async Task<IEnumerable<WebinarParticipantDto>> GetParticipantsAsync(long? webinarId = null)
+        {
+            _logger.LogInformation("[Webinar] GetParticipantsAsync called for WebinarId: {WebinarId}", webinarId);
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                var rows = await conn.QueryAsync<WebinarParticipantDto>(
+                    "wms.sp_AdminViewParticipants",
+                    new { WebinarId = webinarId },
+                    commandType: CommandType.StoredProcedure
+                );
+                var list = rows.ToList();
+                _logger.LogInformation("[Webinar] GetParticipantsAsync returned {Count} participants for WebinarId: {WebinarId}", list.Count, webinarId);
+                return list;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Webinar] GetParticipantsAsync EXCEPTION for WebinarId: {WebinarId}: {Message}", webinarId, ex.Message);
+                return Enumerable.Empty<WebinarParticipantDto>();
             }
         }
 
@@ -343,10 +369,19 @@ namespace WebinarApi.Services
             _logger.LogInformation("[Webinar] RegisterTracking called — TrackingId: {TrackingId}, UserId: {UserId}", trackingId, userId);
             try
             {
+                // Generate 8 random characters for CustomUserId label (e.g. "UserId - aB3xK9pQ")
+                var randomCode = GenerateRandomCode(8);
+                var customUserId = $"UserId - {randomCode}";
+
                 using var conn = new SqlConnection(_connectionString);
                 var result = await conn.QueryFirstOrDefaultAsync<dynamic>(
                     "wms.usp_RegisterUserForWebinar",
-                    new { TrackingId = trackingId.Trim(), UserId = userId },
+                    new
+                    {
+                        TrackingId = trackingId.Trim(),
+                        UserId = userId,
+                        CustomUserId = customUserId
+                    },
                     commandType: CommandType.StoredProcedure
                 );
 
@@ -357,6 +392,7 @@ namespace WebinarApi.Services
                 string message = (string)result.Message;
                 string? webinarName = (string?)result.WebinarName;
 
+                _logger.LogInformation("[Webinar] User registered successfully with CustomUserId: {CustomUserId}", customUserId);
                 return (success, message, webinarName);
             }
             catch (Exception ex)
@@ -364,6 +400,20 @@ namespace WebinarApi.Services
                 _logger.LogError(ex, "[Webinar] RegisterTracking EXCEPTION: {Message}", ex.Message);
                 return (false, "An error occurred during webinar registration", null);
             }
+        }
+
+        private static string GenerateRandomCode(int length)
+        {
+            const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            var result = new char[length];
+            using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+            var bytes = new byte[length];
+            rng.GetBytes(bytes);
+            for (int i = 0; i < length; i++)
+            {
+                result[i] = chars[bytes[i] % chars.Length];
+            }
+            return new string(result);
         }
 
         // -------------------------------------------------------

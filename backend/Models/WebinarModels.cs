@@ -74,6 +74,10 @@ public class WebinarDto
     public bool      IsRegistered      { get; set; }
     public DateTime? RegisteredAt      { get; set; }
     public long?     RegistrationId    { get; set; }
+    public bool?     IsMeetingCreated  { get; set; }
+    public bool      IsCompleted       { get; set; }
+    public string?   ModeratorJoinUrl  { get; set; }
+    public string?   MeetingID         { get; set; }
 }
 
 // -------------------------------------------------------
@@ -156,5 +160,35 @@ public class CompletedWebinarDto
     public int?      CertificateTempId      { get; set; }
     public string?   CertificateTemplateName { get; set; }
     public string?   TemplateImageUrl        { get; set; }
+}
+
+// -------------------------------------------------------
+// DTO: Admin View Participants (from wms.WebinarCompleted)
+// -------------------------------------------------------
+public class WebinarParticipantDto
+{
+    public int       CompletionId           { get; set; }
+    public long      WebinarRegisterId      { get; set; }
+    public long      WebinarId              { get; set; }
+    public string    WebinarName            { get; set; } = string.Empty;
+    public DateTime  WebinarDate            { get; set; }
+    public DateTime  StartTime              { get; set; }
+    public DateTime  EndTime                { get; set; }
+    public int       DurationMinutes        { get; set; }
+    public int       UserId                 { get; set; }
+    public string?   CustomUserId           { get; set; }
+    public string    FullName               { get; set; } = string.Empty;
+    public string?   FirstName              { get; set; }
+    public string?   LastName               { get; set; }
+    public string    Email                  { get; set; } = string.Empty;
+    public string?   CountryCode            { get; set; }
+    public string?   MobileNumber           { get; set; }
+    public string?   FullPhoneNumber        { get; set; }
+    public int       AttendedDuration       { get; set; } // Seconds
+    public bool      IsAttended             { get; set; }
+    public bool      IsCertificateEligible  { get; set; }
+    public string?   CertificateCode        { get; set; }
+    public DateTime  CompletedAt            { get; set; }
+    public DateTime  RegisteredAt           { get; set; }
 }
 

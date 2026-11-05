@@ -16,11 +16,13 @@ import Login               from './pages/Login';
 import Signup              from './pages/Signup';
 import WebinarRegistration from './pages/WebinarRegistration';
 import ModulePlaceholder   from './pages/ModulePlaceholder';
+import AdminDashboard     from './pages/admin/AdminDashboard';
 import AdminAccounts       from './pages/admin/AdminAccounts';
 import AccessControl       from './pages/admin/AccessControl';
 import ActivityLogs        from './pages/admin/ActivityLogs';
 import Categories          from './pages/admin/Categories';
 import Webinars            from './pages/admin/Webinars';
+import Participants        from './pages/admin/Participants';
 import Certifications      from './pages/admin/Certifications';
 import TemplateBuilder    from './pages/admin/TemplateBuilder';
 import UpcomingWebinars    from './pages/student/UpcomingWebinars';
@@ -110,11 +112,11 @@ function AppInner() {
               <Route index element={<Navigate to="/admin/dashboard" replace />} />
 
               {/* ── Webinar Management ── */}
-              <Route path="dashboard"     element={<ModulePlaceholder />} />
+              <Route path="dashboard"     element={<AdminDashboard />} />
               <Route path="webinars"      element={<Webinars />} />
               <Route path="registrations" element={<ModulePlaceholder />} />
               <Route path="payments"      element={<ModulePlaceholder />} />
-              <Route path="participants"  element={<ModulePlaceholder />} />
+              <Route path="participants"  element={<Participants />} />
               <Route path="recordings"    element={<ModulePlaceholder />} />
 
               {/* ── Admin & Settings ── */}

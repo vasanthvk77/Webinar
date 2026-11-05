@@ -18,22 +18,10 @@ import { webinarService }    from '../../services/api';
 import { useAuth }           from '../../context/AuthContext';
 import { useThemeColors }    from '../../context/ThemeContext';
 import CustomSearchBar       from '../../components/CustomSearchBar';
+import { formatUtcToLocalDateOnly } from '../../utils/validation';
 
 // Helper: Format Date
-const formatDate = (dateStr) => {
-  if (!dateStr) return '—';
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  } catch {
-    return dateStr;
-  }
-};
+const formatDate = (dateStr) => formatUtcToLocalDateOnly(dateStr);
 
 // Helper: Format Duration (Seconds to mins/hrs)
 const fmtAttendedDuration = (seconds) => {

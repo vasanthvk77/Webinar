@@ -43,6 +43,11 @@ BEGIN
         CertificateTempId INT NULL
             CONSTRAINT FK_Webinars_CertificateTemplates
                 FOREIGN KEY REFERENCES wms.CertificateTemplates(Id) ON DELETE SET NULL,
+        IsMeetingCreated BIT NOT NULL
+            CONSTRAINT DF_Webinars_IsMeetingCreated DEFAULT 0,
+        IsCompleted      BIT NOT NULL
+            CONSTRAINT DF_Webinars_IsCompleted DEFAULT 0,
+        ModeratorJoinUrl NVARCHAR(2000) NULL,
         CreatedAt        DATETIME2(0) NOT NULL
             CONSTRAINT DF_Webinars_CreatedAt DEFAULT GETDATE(),
         CreatedBy        INT NULL
@@ -109,6 +114,57 @@ IF NOT EXISTS (
 )
 BEGIN
     CREATE UNIQUE INDEX UX_Webinars_ShareId ON wms.Webinars(ShareId);
+END
+GO
+
+-- Ensure IsMeetingCreated column exists on wms.Webinars
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Webinars' AND s.name = 'wms' AND c.name = 'IsMeetingCreated'
+)
+BEGIN
+    ALTER TABLE wms.Webinars ADD IsMeetingCreated BIT NOT NULL CONSTRAINT DF_Webinars_IsMeetingCreated DEFAULT 0;
+END
+GO
+
+-- Ensure ModeratorJoinUrl column exists on wms.Webinars
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Webinars' AND s.name = 'wms' AND c.name = 'ModeratorJoinUrl'
+)
+BEGIN
+    ALTER TABLE wms.Webinars ADD ModeratorJoinUrl NVARCHAR(2000) NULL;
+END
+GO
+
+-- Ensure IsCompleted column exists on wms.Webinars (by default 0)
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Webinars' AND s.name = 'wms' AND c.name = 'IsCompleted'
+)
+BEGIN
+    ALTER TABLE wms.Webinars ADD IsCompleted BIT NOT NULL CONSTRAINT DF_Webinars_IsCompleted DEFAULT 0;
+END
+GO
+
+-- Synchronize existing completed webinars if attendance was already recorded
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WebinarCompleted' AND schema_id = SCHEMA_ID('wms'))
+BEGIN
+    UPDATE w
+    SET w.IsCompleted = 1
+    FROM wms.Webinars w
+    WHERE w.IsCompleted = 0
+      AND EXISTS (
+          SELECT 1 FROM wms.WebinarRegistrations wr
+          JOIN wms.WebinarCompleted wc ON wc.WebinarRegisterId = wr.Id
+          WHERE wr.WebinarId = w.Id AND wc.IsAttended = 1
+      );
 END
 GO
 
@@ -212,8 +268,13 @@ BEGIN
         w.UpdatedAt,
         w.UpdatedBy,
         uu.FirstName + ISNULL(' ' + uu.LastName, '') AS UpdatedByName,
-        (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount
+        (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
+        w.IsMeetingCreated,
+        w.IsCompleted,
+        w.ModeratorJoinUrl,
+        m.MeetingID
     FROM wms.Webinars w
+    LEFT JOIN wms.Meetings m ON m.WebinarId = w.Id
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
     LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
@@ -254,8 +315,13 @@ BEGIN
         w.ShareId,
         w.CertificateTempId,
         ct.CertificateName AS CertificateTemplateName,
-        (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount
+        (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
+        w.IsMeetingCreated,
+        w.IsCompleted,
+        w.ModeratorJoinUrl,
+        m.MeetingID
     FROM wms.Webinars w
+    LEFT JOIN wms.Meetings m ON m.WebinarId = w.Id
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
     LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     WHERE w.ShareId = @ShareId;
@@ -346,7 +412,11 @@ BEGIN
         w.UpdatedAt,
         w.UpdatedBy,
         NULL AS UpdatedByName,
-        0 AS RegistrationCount
+        0 AS RegistrationCount,
+        w.IsMeetingCreated,
+        w.IsCompleted,
+        w.ModeratorJoinUrl,
+        NULL AS MeetingID
     FROM wms.Webinars w
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
     LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
@@ -450,8 +520,13 @@ BEGIN
         w.UpdatedAt,
         w.UpdatedBy,
         uu.FirstName + ISNULL(' ' + uu.LastName, '') AS UpdatedByName,
-        (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount
+        (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
+        w.IsMeetingCreated,
+        w.IsCompleted,
+        w.ModeratorJoinUrl,
+        m.MeetingID
     FROM wms.Webinars w
+    LEFT JOIN wms.Meetings m ON m.WebinarId = w.Id
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
     LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
@@ -825,15 +900,15 @@ END
 GO
 
 -- ============================================================
--- TABLE: dbo.WebinarCompleted
+-- TABLE: wms.WebinarCompleted
 -- ============================================================
 IF NOT EXISTS (
     SELECT 1 FROM sys.tables t
     JOIN sys.schemas s ON t.schema_id = s.schema_id
-    WHERE t.name = 'WebinarCompleted'
+    WHERE t.name = 'WebinarCompleted' AND s.name = 'wms'
 )
 BEGIN
-    CREATE TABLE dbo.WebinarCompleted
+    CREATE TABLE wms.WebinarCompleted
     (
         Id INT IDENTITY(1,1) PRIMARY KEY,
 
@@ -863,29 +938,35 @@ END
 GO
 
 -- Ensure CertificateCode column exists if table was previously created
-IF NOT EXISTS (
-    SELECT 1 FROM sys.columns 
-    WHERE object_id = OBJECT_ID('dbo.WebinarCompleted') 
-      AND name = 'CertificateCode'
+IF EXISTS (
+    SELECT 1 FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'WebinarCompleted' AND s.name = 'wms'
+)
+AND NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'WebinarCompleted' AND s.name = 'wms' AND c.name = 'CertificateCode'
 )
 BEGIN
-    ALTER TABLE dbo.WebinarCompleted ADD CertificateCode NVARCHAR(100) NULL;
+    ALTER TABLE wms.WebinarCompleted ADD CertificateCode NVARCHAR(100) NULL;
 END
 GO
 
 -- ============================================================
--- SP: dbo.certificateEligibilityCheck
+-- SP: wms.certificateEligibilityCheck
 -- Evaluates the 3 Conditions:
 -- 1. User & Registration Match: Maps WebinarRegisterId -> wr.Id -> wr.UserId -> u.Id
 -- 2. Webinar Completed: wc.IsAttended = 1 -> Shows in Completed Webinars
 -- 3. Certificate Eligible: wc.IsCertificateEligible = 1 -> Allows Certificate PDF Download
 --    If only (1) and (2) are true -> Shows as completed, but NO certificate download.
 -- ============================================================
-IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'certificateEligibilityCheck')
-    DROP PROCEDURE dbo.certificateEligibilityCheck;
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'certificateEligibilityCheck' AND s.name = 'wms')
+    DROP PROCEDURE wms.certificateEligibilityCheck;
 GO
 
-CREATE PROCEDURE dbo.certificateEligibilityCheck
+CREATE PROCEDURE wms.certificateEligibilityCheck
     @UserId    INT,
     @WebinarId BIGINT = NULL
 AS
@@ -943,7 +1024,7 @@ BEGIN
         u.FirstName + ISNULL(' ' + u.LastName, '') AS ParticipantName,
         COALESCE(wc.CertificateCode, 'PDX-WB-' + CAST(w.Id AS NVARCHAR(20)) + '-' + CAST(u.Id AS NVARCHAR(20))) AS CertificateId
 
-    FROM dbo.WebinarCompleted wc
+    FROM wms.WebinarCompleted wc
     INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
     INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
     INNER JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
@@ -953,6 +1034,99 @@ BEGIN
       AND wc.IsAttended = 1 -- Condition 2: Completed webinar
       AND (@WebinarId IS NULL OR w.Id = @WebinarId)
     ORDER BY w.WebinarDate DESC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.sp_AdminViewParticipants
+-- Purpose : View participants from wms.WebinarCompleted for a selected webinar.
+--           If @WebinarId is NULL or <= 0, defaults to the latest webinar.
+--           If @WebinarId is -1, returns participants across all webinars.
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_AdminViewParticipants' AND s.name = 'wms')
+    DROP PROCEDURE wms.sp_AdminViewParticipants;
+GO
+
+CREATE PROCEDURE wms.sp_AdminViewParticipants
+    @WebinarId BIGINT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- If -1 passed, return participants across all webinars
+    IF @WebinarId = -1
+    BEGIN
+        SELECT
+            wc.Id AS CompletionId,
+            wc.WebinarRegisterId,
+            wr.WebinarId,
+            w.WebinarName,
+            w.WebinarDate,
+            w.StartTime,
+            w.EndTime,
+            w.DurationMinutes,
+            wr.UserId,
+            wr.CustomUserId,
+            LTRIM(RTRIM(ISNULL(u.FirstName, '') + ' ' + ISNULL(u.LastName, ''))) AS FullName,
+            u.FirstName,
+            u.LastName,
+            u.Email,
+            u.CountryCode,
+            u.MobileNumber,
+            ISNULL(u.CountryCode, '') + ISNULL(u.MobileNumber, '') AS FullPhoneNumber,
+            wc.AttendedDuration, -- In seconds
+            wc.IsAttended,
+            wc.IsCertificateEligible,
+            wc.CertificateCode,
+            wc.CreatedAt AS CompletedAt,
+            wr.CreatedDateTime AS RegisteredAt
+        FROM wms.WebinarCompleted wc
+        INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
+        INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
+        INNER JOIN wms.Users u ON u.Id = wr.UserId
+        ORDER BY wc.CreatedAt DESC, wc.Id DESC;
+        RETURN;
+    END
+
+    -- If no WebinarId provided, default to the latest created webinar
+    IF @WebinarId IS NULL OR @WebinarId <= 0
+    BEGIN
+        SELECT TOP 1 @WebinarId = Id
+        FROM wms.Webinars
+        ORDER BY CreatedAt DESC, Id DESC;
+    END
+
+    -- Return participants for the resolved @WebinarId
+    SELECT
+        wc.Id AS CompletionId,
+        wc.WebinarRegisterId,
+        wr.WebinarId,
+        w.WebinarName,
+        w.WebinarDate,
+        w.StartTime,
+        w.EndTime,
+        w.DurationMinutes,
+        wr.UserId,
+        wr.CustomUserId,
+        LTRIM(RTRIM(ISNULL(u.FirstName, '') + ' ' + ISNULL(u.LastName, ''))) AS FullName,
+        u.FirstName,
+        u.LastName,
+        u.Email,
+        u.CountryCode,
+        u.MobileNumber,
+        ISNULL(u.CountryCode, '') + ISNULL(u.MobileNumber, '') AS FullPhoneNumber,
+        wc.AttendedDuration, -- In seconds
+        wc.IsAttended,
+        wc.IsCertificateEligible,
+        wc.CertificateCode,
+        wc.CreatedAt AS CompletedAt,
+        wr.CreatedDateTime AS RegisteredAt
+    FROM wms.WebinarCompleted wc
+    INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
+    INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    INNER JOIN wms.Users u ON u.Id = wr.UserId
+    WHERE wr.WebinarId = @WebinarId
+    ORDER BY wc.CreatedAt DESC, wc.Id DESC;
 END
 GO
 

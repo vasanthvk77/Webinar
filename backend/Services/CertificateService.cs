@@ -59,7 +59,7 @@ public static class CertificateOverlayLayoutConfig
     // ==========================================
     // 1. Certificate Number (Top Right)
     // ==========================================
-    public static float CertNumberTopPadding = 40f;
+    public static float CertNumberTopPadding = 70f;
     public static float CertNumberRightPadding = 52f;
     public static float CertNumberFontSize = 10.5f;
     public static string CertNumberLabelColor = "#fafafaff";
@@ -81,7 +81,7 @@ public static class CertificateOverlayLayoutConfig
     // ==========================================
     // 3. Participation & Webinar Name / Date Block
     // ==========================================
-    public static float ParticipationBlockTopPadding = 18f; // Moved down below the line over the placeholder text
+    public static float ParticipationBlockTopPadding = 20f; // Moved down below the line over the placeholder text
     public static float ParticipationBlockWidth = 720f;
     public static float ParticipationBlockHeight = 82f;
     public static float BodyFontSize = 13.5f; // Crisp fit over the 3-line placeholder area

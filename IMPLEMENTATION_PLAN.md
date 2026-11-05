@@ -693,7 +693,7 @@ DBModels/
 | Precedence | UserTabAccess → RoleTabAccess → DENY |
 | Default on Admin Create | Auto-insert RoleTabAccess for all admin tabs EXCEPT Access Control |
 | Access Control tab | Only visible to Super Admin, or Admin with explicit UserTabAccess grant |
-| wms schema | All new tables use `wms.` schema — never `dbo.` |
+| wms schema | All new tables use `wms.` schema — never `wms.` |
 | FK column names | Use `wms.Users(Id)` and `wms.Roles(Id)` — NOT UserId / RoleId |
 | Tab fetch API | Called once after login, cached in AuthContext |
 | Frontend tab rendering | Sidebar reads `allowedTabs` from context — no per-component API calls |

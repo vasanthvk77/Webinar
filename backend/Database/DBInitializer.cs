@@ -23,7 +23,9 @@ public static class DBInitializer
         "../DBModels/activitylog.sql",
         "../DBModels/categories.sql",
         "../DBModels/certificatetemplates.sql",
-        "../DBModels/webinars.sql"
+        "../DBModels/webinars.sql",
+        "../DBModels/Meeting.sql",
+        "../DBModels/dashboard.sql"
     };
 
     // Called from Program.cs on server startup

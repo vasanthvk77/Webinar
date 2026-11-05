@@ -17,13 +17,53 @@ import CurrencyRupeeIcon from '@mui/icons-material/CurrencyRupee';
 import ContentCopyIcon   from '@mui/icons-material/ContentCopy';
 import SendIcon          from '@mui/icons-material/Send';
 import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
+import CalendarMonthIcon   from '@mui/icons-material/CalendarMonth';
+import AutorenewIcon       from '@mui/icons-material/Autorenew';
 import toast             from 'react-hot-toast';
-import { webinarService, categoryService, certificateTemplateService } from '../../services/api';
+import { webinarService, categoryService, certificateTemplateService, meetingService } from '../../services/api';
 import { useAuth }          from '../../context/AuthContext';
 import { useThemeColors }   from '../../context/ThemeContext';
 import CustomSearchBar      from '../../components/CustomSearchBar';
 import CustomTimePicker     from '../../components/CustomeTimePicker';
 import CustomDatePicker     from '../../components/CustomeDatePicker';
+import {
+  formatUtcToLocal,
+  formatUtcToLocalDateOnly,
+  formatUtcToLocalTimeOnly,
+  formatUtcToLocalDateDDMMYYYY,
+  formatUtcToLocalTime24,
+  formatUtcToLocalDateInput
+} from '../../utils/validation';
+
+const EMPTY_MEETING_FORM = {
+  webinarId: null,
+  name: '',
+  meetingID: '',
+  maxParticipants: '',
+  duration: '',
+  record: false,
+  autoStartRecording: false,
+  allowStartStopRecording: true,
+  logoutURL: '',
+  meetingExpireIfNoUserJoinedInMinutes: 300,
+  meetingExpireWhenLastUserLeftInMinutes: 1,
+  endWhenNoModerator: false,
+  guestPolicy: 'ALWAYS_ACCEPT',
+  muteOnStart: true,
+  meetingLayout: 'UNIFIED_LAYOUT',
+  lockSettingsPresenterPolicy: 'default',
+  moderatorPW: '',
+  attendeePW: '',
+};
+
+const generateRandomMeetingId = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let res = '';
+  for (let i = 0; i < 8; i++) {
+    res += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return res;
+};
 
 const EMPTY_FORM = {
   webinarName:      '',
@@ -75,8 +115,13 @@ export default function Webinars() {
   const [form,      setForm]      = useState(EMPTY_FORM);
   const [formError, setFormError] = useState('');
 
+  const [meetingForm, setMeetingForm]   = useState(EMPTY_MEETING_FORM);
+  const [meetingError, setMeetingError] = useState('');
+  const setMeetingField = (key, val) => { setMeetingForm(p => ({ ...p, [key]: val })); setMeetingError(''); };
+
   const [menu, setMenu] = useState(null);
   const [bulkLoadingId, setBulkLoadingId] = useState(null);
+  const [regeneratingId, setRegeneratingId] = useState(null);
 
   // Live-calculated duration shown in the read-only field
   const calculatedDuration = useMemo(
@@ -124,23 +169,15 @@ export default function Webinars() {
   // ── Helpers ───────────────────────────────────────────
   const setField = (key, val) => { setForm(p => ({ ...p, [key]: val })); setFormError(''); };
 
-  const toISOLocal = (d) => d ? new Date(d).toLocaleDateString() : '—';
+  const toISOLocal = (d) => formatUtcToLocalDateDDMMYYYY(d);
 
-  const fmtTime = (d) => d
-    ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })
-    : '—';
+  const fmtTime = (d) => formatUtcToLocalTimeOnly(d);
 
-  // Extract "HH:mm" from a stored datetime string
-  const toTimeOnly = (d) => {
-    if (!d) return '';
-    const dt = new Date(d);
-    return dt.toTimeString().slice(0, 5); // "HH:mm"
-  };
+  // Extract local "HH:mm" from stored UTC datetime string
+  const toTimeOnly = (d) => formatUtcToLocalTime24(d);
 
-  const toInputDate = (d) => {
-    if (!d) return '';
-    return new Date(d).toISOString().slice(0, 10);
-  };
+  // Extract local "YYYY-MM-DD" from stored UTC datetime string
+  const toInputDate = (d) => formatUtcToLocalDateInput(d);
 
   // ── Modals ───────────────────────────────────────────
   const openCreate = () => {
@@ -153,7 +190,7 @@ export default function Webinars() {
       webinarName:       row.webinarName,
       categoryId:        String(row.categoryId),
       certificateTempId: row.certificateTempId ? String(row.certificateTempId) : '',
-      webinarDate:       toInputDate(row.webinarDate),
+      webinarDate:       toInputDate(row.startTime || row.webinarDate),
       startTime:         toTimeOnly(row.startTime),
       endTime:           toTimeOnly(row.endTime),
       conductorName:     row.conductorName,
@@ -168,7 +205,117 @@ export default function Webinars() {
   };
 
   const openDelete = (row) => { setTarget(row); setModal('delete'); };
-  const closeModal = ()    => { setModal(null); setTarget(null); setSaving(false); };
+
+  const openScheduleMeeting = async (row) => {
+    setTarget(row);
+    setMeetingError('');
+    const randomMeetingId = generateRandomMeetingId();
+    const randomModeratorPW = generateRandomMeetingId();
+    const randomAttendeePW = generateRandomMeetingId();
+    const defaults = {
+      ...EMPTY_MEETING_FORM,
+      webinarId: row.id,
+      name: row.webinarName || '',
+      meetingID: randomMeetingId,
+      maxParticipants: row.participantLimit || 100,
+      duration: row.durationMinutes || 60,
+      moderatorPW: randomModeratorPW,
+      attendeePW: randomAttendeePW,
+    };
+    setMeetingForm(defaults);
+    setModal('schedule');
+
+    try {
+      const res = await meetingService.getByWebinarId(row.id);
+      if (res.data?.success && res.data?.data) {
+        const m = res.data.data;
+        setMeetingForm({
+          webinarId: m.webinarId,
+          name: m.name || row.webinarName,
+          meetingID: m.meetingID || randomMeetingId,
+          maxParticipants: m.maxParticipants || row.participantLimit,
+          duration: m.duration || row.durationMinutes,
+          record: Boolean(m.record),
+          autoStartRecording: Boolean(m.autoStartRecording),
+          allowStartStopRecording: m.allowStartStopRecording !== undefined ? Boolean(m.allowStartStopRecording) : true,
+          logoutURL: m.logoutURL || '',
+          meetingExpireIfNoUserJoinedInMinutes: m.meetingExpireIfNoUserJoinedInMinutes ?? 300,
+          meetingExpireWhenLastUserLeftInMinutes: m.meetingExpireWhenLastUserLeftInMinutes ?? 1,
+          endWhenNoModerator: Boolean(m.endWhenNoModerator),
+          guestPolicy: m.guestPolicy || 'ALWAYS_ACCEPT',
+          muteOnStart: m.muteOnStart !== undefined ? Boolean(m.muteOnStart) : true,
+          meetingLayout: m.meetingLayout || 'UNIFIED_LAYOUT',
+          lockSettingsPresenterPolicy: m.lockSettingsPresenterPolicy || 'default',
+          moderatorPW: m.moderatorPW || randomModeratorPW,
+          attendeePW: m.attendeePW || randomAttendeePW,
+        });
+      }
+    } catch {
+      // keep defaults
+    }
+  };
+
+  const handleScheduleSubmit = async () => {
+    setMeetingError('');
+    if (!meetingForm.name?.trim()) {
+      setMeetingError('Meeting name is required.');
+      return;
+    }
+    if (!meetingForm.meetingID?.trim()) {
+      setMeetingError('Meeting ID is required.');
+      return;
+    }
+    if (!meetingForm.maxParticipants || Number(meetingForm.maxParticipants) <= 0) {
+      setMeetingError('Max participants must be greater than 0.');
+      return;
+    }
+    if (!meetingForm.duration || Number(meetingForm.duration) <= 0) {
+      setMeetingError('Duration must be greater than 0.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        webinarId: Number(meetingForm.webinarId),
+        meetingID: meetingForm.meetingID.trim(),
+        name: meetingForm.name.trim(),
+        maxParticipants: Number(meetingForm.maxParticipants),
+        duration: Number(meetingForm.duration),
+        record: Boolean(meetingForm.record),
+        autoStartRecording: Boolean(meetingForm.autoStartRecording),
+        allowStartStopRecording: Boolean(meetingForm.allowStartStopRecording),
+        logoutURL: meetingForm.logoutURL?.trim() || null,
+        meetingExpireIfNoUserJoinedInMinutes: Number(meetingForm.meetingExpireIfNoUserJoinedInMinutes) || 300,
+        meetingExpireWhenLastUserLeftInMinutes: Number(meetingForm.meetingExpireWhenLastUserLeftInMinutes) || 1,
+        endWhenNoModerator: Boolean(meetingForm.endWhenNoModerator),
+        guestPolicy: meetingForm.guestPolicy || 'ALWAYS_ACCEPT',
+        muteOnStart: Boolean(meetingForm.muteOnStart),
+        meetingLayout: meetingForm.meetingLayout || 'UNIFIED_LAYOUT',
+        lockSettingsPresenterPolicy: meetingForm.lockSettingsPresenterPolicy || 'default',
+        moderatorPW: meetingForm.moderatorPW?.trim() || null,
+        attendeePW: meetingForm.attendeePW?.trim() || null,
+      };
+
+      const res = await meetingService.schedule(payload);
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Meeting scheduled successfully!');
+        closeModal();
+      } else {
+        const errorMsg = res.data?.message || 'Failed to schedule meeting.';
+        setMeetingError(errorMsg);
+        toast.error(errorMsg);
+      }
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || 'Failed to schedule meeting.';
+      setMeetingError(errorMsg);
+      toast.error(errorMsg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const closeModal = ()    => { setModal(null); setTarget(null); setSaving(false); setMeetingError(''); };
 
   // ── Validate & build payload ──────────────────────────
   const buildPayload = () => {
@@ -312,6 +459,27 @@ export default function Webinars() {
     }, 5000);
   };
 
+  // ── Regenerate Moderator Link ──────────────────────────
+  const handleRegenerateLink = async (w) => {
+    setRegeneratingId(w.id);
+    const toastId = toast.loading(`Regenerating moderator link for "${w.webinarName}"...`);
+    try {
+      const res = await meetingService.regenerateModeratorLink(w.id);
+      if (res.data?.success && res.data?.moderatorJoinUrl) {
+        const newUrl = res.data.moderatorJoinUrl;
+        setWebinars(prev => prev.map(item => item.id === w.id ? { ...item, moderatorJoinUrl: newUrl, isMeetingCreated: true } : item));
+        setFiltered(prev => prev.map(item => item.id === w.id ? { ...item, moderatorJoinUrl: newUrl, isMeetingCreated: true } : item));
+        toast.success('Moderator link regenerated successfully!', { id: toastId });
+      } else {
+        toast.error(res.data?.message || 'Failed to regenerate moderator link.', { id: toastId });
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || 'Error regenerating moderator link.', { id: toastId });
+    } finally {
+      setRegeneratingId(null);
+    }
+  };
+
   // ── Shared styles ─────────────────────────────────────
   const inputSx = {
     '& .MuiOutlinedInput-root': {
@@ -412,7 +580,7 @@ export default function Webinars() {
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell sx={{ fontSize: '12px', color: colors.textMuted }}>{toISOLocal(w.webinarDate)}</TableCell>
+                    <TableCell sx={{ fontSize: '12px', color: colors.textMuted }}>{toISOLocal(w.startTime || w.webinarDate)}</TableCell>
                     <TableCell sx={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
                       {fmtTime(w.startTime)} – {fmtTime(w.endTime)}
                     </TableCell>
@@ -452,13 +620,52 @@ export default function Webinars() {
                       </Box>
                     </TableCell>
                     <TableCell>
-                      {isSuperAdmin && (
-                        <Tooltip title="Actions">
-                          <IconButton size="small" onClick={e => openMenu(e, w)} sx={{ color: colors.textMuted, '&:hover': { color: colors.primary } }}>
-                            <MoreVertIcon sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>
-                      )}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {Boolean(w.isCompleted) ? (
+                          <Chip
+                            label="Completed"
+                            size="small"
+                            sx={{
+                              bgcolor: 'rgba(147, 51, 234, 0.12)',
+                              color: '#9333EA',
+                              fontWeight: 700,
+                              fontSize: '11px',
+                              borderRadius: 1.5,
+                              py: 0.2
+                            }}
+                          />
+                        ) : Boolean(w.isMeetingCreated) && w.moderatorJoinUrl ? (
+                          <Button
+                            variant="contained"
+                            size="small"
+                            disabled={regeneratingId === w.id}
+                            startIcon={regeneratingId === w.id ? <CircularProgress size={14} color="inherit" /> : <VideoCallIcon sx={{ fontSize: 16 }} />}
+                            onClick={() => window.open(w.moderatorJoinUrl, '_blank', 'noopener,noreferrer')}
+                            sx={{
+                              bgcolor: colors.success,
+                              color: '#fff',
+                              '&:hover': { bgcolor: '#16a34a' },
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              textTransform: 'none',
+                              py: 0.4,
+                              px: 1.2,
+                              borderRadius: 1.5,
+                              whiteSpace: 'nowrap',
+                              boxShadow: 'none',
+                            }}
+                          >
+                            {regeneratingId === w.id ? 'Regenerating...' : 'Join Webinar'}
+                          </Button>
+                        ) : null}
+                        {isSuperAdmin && (
+                          <Tooltip title="Actions">
+                            <IconButton size="small" onClick={e => openMenu(e, w)} sx={{ color: colors.textMuted, '&:hover': { color: colors.primary } }}>
+                              <MoreVertIcon sx={{ fontSize: 18 }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -490,6 +697,39 @@ export default function Webinars() {
           Send Bulk Invite
         </MenuItem>
         <Divider sx={{ borderColor: colors.border, my: 0.5 }} />
+        {Boolean(menu?.row?.isMeetingCreated) && menu?.row?.moderatorJoinUrl && (
+          <>
+            <MenuItem
+              onClick={() => {
+                const url = menu.row.moderatorJoinUrl;
+                closeMenu();
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }}
+              sx={{ color: colors.success, fontWeight: 600 }}
+            >
+              <ListItemIcon sx={{ minWidth: 'unset' }}><VideoCallIcon sx={{ fontSize: 16, color: colors.success }} /></ListItemIcon>
+              Join as Moderator
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                const row = menu.row;
+                closeMenu();
+                handleRegenerateLink(row);
+              }}
+              disabled={regeneratingId === menu.row.id}
+              sx={{ color: colors.primary, fontWeight: 500 }}
+            >
+              <ListItemIcon sx={{ minWidth: 'unset' }}>
+                <AutorenewIcon sx={{ fontSize: 16, color: colors.primary }} />
+              </ListItemIcon>
+              Regenerate link
+            </MenuItem>
+          </>
+        )}
+        <MenuItem onClick={() => { closeMenu(); openScheduleMeeting(menu.row); }} sx={{ color: colors.primary }}>
+          <ListItemIcon sx={{ minWidth: 'unset' }}><CalendarMonthIcon sx={{ fontSize: 16, color: colors.accent }} /></ListItemIcon>
+          Schedule Meeting
+        </MenuItem>
         <MenuItem onClick={() => { closeMenu(); openEdit(menu.row); }} sx={{ color: colors.primary }}>
           <ListItemIcon sx={{ minWidth: 'unset' }}><EditIcon sx={{ fontSize: 16, color: colors.primary }} /></ListItemIcon>
           Edit
@@ -772,6 +1012,314 @@ export default function Webinars() {
             sx={{ bgcolor: colors.error, color: '#fff', '&:hover': { bgcolor: colors.error, opacity: 0.88 }, fontWeight: 700, borderRadius: 2, minWidth: 100 }}
           >
             {saving ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ══════════════════════════════════════════════════
+          SCHEDULE MEETING MODAL
+      ══════════════════════════════════════════════════ */}
+      <Dialog
+        open={modal === 'schedule'}
+        onClose={closeModal}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3, boxShadow: '0 20px 60px rgba(0,0,0,0.15)', border: 'none' } }}
+      >
+        {/* Header */}
+        <Box sx={{ px: 3.5, pt: 3, pb: 2, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: colors.accentMuted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <CalendarMonthIcon sx={{ fontSize: 20, color: colors.accent }} />
+            </Box>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: '17px', color: colors.primary }}>
+                Schedule Meeting
+              </Typography>
+              <Typography sx={{ fontSize: '12.5px', color: colors.textMuted, mt: 0.1 }}>
+                Configure and schedule meeting settings for this webinar
+              </Typography>
+            </Box>
+          </Box>
+          <IconButton size="small" onClick={closeModal} sx={{ color: colors.textMuted, mt: 0.25 }}>
+            <CloseIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Box>
+
+        <Divider sx={{ borderColor: colors.border }} />
+
+        <DialogContent sx={{ px: 3.5, pt: 2.5, pb: 1 }}>
+          {/* Row 1 — Meeting Name + Meeting ID */}
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Box sx={{ flex: 2 }}>
+              <Label text="Meeting Name" required />
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="e.g. Machine Learning Live Session"
+                value={meetingForm.name}
+                onChange={e => setMeetingField('name', e.target.value)}
+                sx={inputSx}
+              />
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Meeting ID (Generated)" required />
+              <TextField
+                fullWidth
+                size="small"
+                disabled
+                value={meetingForm.meetingID}
+                helperText="Auto-generated 8-character ID"
+                FormHelperTextProps={{ sx: { fontSize: '11px', color: colors.textMuted } }}
+                sx={readOnlySx}
+              />
+            </Box>
+          </Box>
+
+          {/* Row — Role Passwords (Generated) */}
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Moderator Password (Generated)" required />
+              <TextField
+                fullWidth
+                size="small"
+                disabled
+                value={meetingForm.moderatorPW}
+                helperText="Auto-generated role password for Moderator"
+                FormHelperTextProps={{ sx: { fontSize: '11px', color: colors.textMuted } }}
+                sx={readOnlySx}
+              />
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Attendee Password (Generated)" required />
+              <TextField
+                fullWidth
+                size="small"
+                disabled
+                value={meetingForm.attendeePW}
+                helperText="Auto-generated role password for Students"
+                FormHelperTextProps={{ sx: { fontSize: '11px', color: colors.textMuted } }}
+                sx={readOnlySx}
+              />
+            </Box>
+          </Box>
+
+          {/* Row 2 — Max Participants + Duration + Logout URL */}
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Max Participants" required />
+              <TextField
+                fullWidth
+                size="small"
+                type="number"
+                value={meetingForm.maxParticipants}
+                onChange={e => setMeetingField('maxParticipants', e.target.value)}
+                sx={inputSx}
+                inputProps={{ min: 1 }}
+              />
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Duration (Minutes)" required />
+              <TextField
+                fullWidth
+                size="small"
+                type="number"
+                value={meetingForm.duration}
+                onChange={e => setMeetingField('duration', e.target.value)}
+                sx={inputSx}
+                inputProps={{ min: 1 }}
+              />
+            </Box>
+            <Box sx={{ flex: 1.5 }}>
+              <Label text="Logout URL" />
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="https://example.com/thanks"
+                value={meetingForm.logoutURL}
+                onChange={e => setMeetingField('logoutURL', e.target.value)}
+                sx={inputSx}
+              />
+            </Box>
+          </Box>
+
+          {/* Row 3 — Expiry Settings */}
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Expire If No User Joined (Mins)" />
+              <TextField
+                fullWidth
+                size="small"
+                type="number"
+                value={meetingForm.meetingExpireIfNoUserJoinedInMinutes}
+                onChange={e => setMeetingField('meetingExpireIfNoUserJoinedInMinutes', e.target.value)}
+                sx={inputSx}
+                inputProps={{ min: 1 }}
+              />
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Expire When Last User Left (Mins)" />
+              <TextField
+                fullWidth
+                size="small"
+                type="number"
+                value={meetingForm.meetingExpireWhenLastUserLeftInMinutes}
+                onChange={e => setMeetingField('meetingExpireWhenLastUserLeftInMinutes', e.target.value)}
+                sx={inputSx}
+                inputProps={{ min: 0 }}
+              />
+            </Box>
+          </Box>
+
+          {/* Row 4 — Policies & Layout */}
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Guest Policy" />
+              <TextField
+                fullWidth
+                size="small"
+                select
+                value={meetingForm.guestPolicy}
+                onChange={e => setMeetingField('guestPolicy', e.target.value)}
+                sx={inputSx}
+              >
+                <MenuItem value="ALWAYS_ACCEPT">ALWAYS_ACCEPT (Default)</MenuItem>
+                <MenuItem value="ASK_MODERATOR">ASK_MODERATOR</MenuItem>
+                <MenuItem value="ALWAYS_DENY">ALWAYS_DENY</MenuItem>
+              </TextField>
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Meeting Layout" />
+              <TextField
+                fullWidth
+                size="small"
+                select
+                value={meetingForm.meetingLayout}
+                onChange={e => setMeetingField('meetingLayout', e.target.value)}
+                sx={inputSx}
+              >
+                <MenuItem value="UNIFIED_LAYOUT">UNIFIED_LAYOUT (Default)</MenuItem>
+                <MenuItem value="SMART_LAYOUT">SMART_LAYOUT</MenuItem>
+                <MenuItem value="PRESENTATION_FOCUS">PRESENTATION_FOCUS</MenuItem>
+                <MenuItem value="VIDEO_FOCUS">VIDEO_FOCUS</MenuItem>
+              </TextField>
+            </Box>
+            <Box sx={{ flex: 1 }}>
+              <Label text="Presenter Policy" />
+              <TextField
+                fullWidth
+                size="small"
+                select
+                value={meetingForm.lockSettingsPresenterPolicy}
+                onChange={e => setMeetingField('lockSettingsPresenterPolicy', e.target.value)}
+                sx={inputSx}
+              >
+                <MenuItem value="default">Default</MenuItem>
+                <MenuItem value="allow">Allow</MenuItem>
+                <MenuItem value="deny">Deny</MenuItem>
+              </TextField>
+            </Box>
+          </Box>
+
+          {/* Row 5 — Flags & Toggles */}
+          <Box
+            sx={{
+              p: 2,
+              bgcolor: colors.surfaceAlt,
+              borderRadius: 2,
+              border: `1px solid ${colors.border}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1.5,
+              mb: 1.5,
+            }}
+          >
+            <Typography sx={{ fontSize: '13px', fontWeight: 600, color: colors.primary }}>
+              Meeting Rules & Recording
+            </Typography>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' },
+                gap: 1.5,
+              }}
+            >
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={meetingForm.muteOnStart}
+                    onChange={e => setMeetingField('muteOnStart', e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Mute On Start</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={meetingForm.record}
+                    onChange={e => setMeetingField('record', e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Record Meeting</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={meetingForm.autoStartRecording}
+                    onChange={e => setMeetingField('autoStartRecording', e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Auto Start Recording</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={meetingForm.allowStartStopRecording}
+                    onChange={e => setMeetingField('allowStartStopRecording', e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Allow Start/Stop Recording</Typography>}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={meetingForm.endWhenNoModerator}
+                    onChange={e => setMeetingField('endWhenNoModerator', e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>End When No Moderator</Typography>}
+              />
+            </Box>
+          </Box>
+
+          {meetingError && (
+            <Typography sx={{ fontSize: '12px', color: colors.error, mt: 1 }}>{meetingError}</Typography>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3.5, pb: 3, pt: 2, gap: 1 }}>
+          <Button onClick={closeModal} disabled={saving} sx={{ color: colors.textSecondary, fontWeight: 600, borderRadius: 2 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleScheduleSubmit}
+            disabled={saving}
+            sx={{
+              bgcolor: colors.accent,
+              color: colors.textOnAccent,
+              '&:hover': { bgcolor: colors.accentDark },
+              fontWeight: 700,
+              borderRadius: 2,
+              minWidth: 120,
+            }}
+          >
+            {saving ? <CircularProgress size={18} sx={{ color: colors.textOnAccent }} /> : 'Schedule'}
           </Button>
         </DialogActions>
       </Dialog>
