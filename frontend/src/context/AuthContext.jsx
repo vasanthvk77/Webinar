@@ -57,7 +57,17 @@ export function AuthProvider({ children }) {
 
     // Only Admin (roleId=2) has DB-controlled tabs
     if (storedUser.roleId !== 2) {
-      setTabsReady(true);
+      // Industry-standard session revalidation: fetch fresh profile from DB on reload
+      api.get('/api/student/profile')
+        .then(res => {
+          if (res.data?.success && res.data?.data) {
+            updateUser(res.data.data);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          setTabsReady(true);
+        });
       return;
     }
 
@@ -90,6 +100,18 @@ export function AuthProvider({ children }) {
     localStorage.setItem('token',       jwtToken);
     localStorage.setItem('firstName',   userData.firstName);
     localStorage.setItem('allowedTabs', JSON.stringify(tabs));
+  }, []);
+
+  // ── updateUser() ─────────────────────────────────────────
+  const updateUser = useCallback((newUserData) => {
+    setUser(prev => {
+      const merged = { ...prev, ...newUserData };
+      localStorage.setItem('user', JSON.stringify(merged));
+      if (newUserData.firstName) {
+        localStorage.setItem('firstName', newUserData.firstName);
+      }
+      return merged;
+    });
   }, []);
 
   // ── logout() ────────────────────────────────────────────
@@ -134,6 +156,7 @@ export function AuthProvider({ children }) {
     isStudent,
     login,
     logout,
+    updateUser,
     canAccessTab,
   };
 

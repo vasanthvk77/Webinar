@@ -18,10 +18,12 @@ import BoltIcon from '@mui/icons-material/Bolt';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import VideoCallIcon from '@mui/icons-material/VideoCall';
+import PaymentsIcon from '@mui/icons-material/Payments';
+import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import toast from 'react-hot-toast';
 
-import { dashboardService } from '../../services/api';
-import { useThemeColors } from '../../context/ThemeContext';
+import { dashboardService, webinarService } from '../../services/api';
+import { useThemeColors, CHART_PILLARS } from '../../context/ThemeContext';
 import {
   formatUtcToLocalDateOnly,
   formatUtcToLocalTimeOnly
@@ -44,9 +46,13 @@ const fmtDuration = (seconds) => {
 };
 
 // ── Professional Stat Tile Component (Unified, Executive Look) ──
-function StatTile({ icon, label, value, sub, loading, colors }) {
+function StatTile({ icon, label, value, sub, loading, colors, onClick }) {
+  const isStringVal = typeof value === 'string';
+  const isLongVal = isStringVal && value.length > 12;
+
   return (
     <Box
+      onClick={onClick}
       sx={{
         position: 'relative',
         display: 'flex',
@@ -59,6 +65,7 @@ function StatTile({ icon, label, value, sub, loading, colors }) {
         border: `1px solid ${colors.border}`,
         boxShadow: '0 1px 3px rgba(15,23,42,0.03), 0 8px 20px -14px rgba(15,23,42,0.08)',
         transition: 'all 0.22s ease',
+        cursor: onClick ? 'pointer' : 'default',
         '&:hover': {
           transform: 'translateY(-2px)',
           borderColor: GOLD,
@@ -88,13 +95,24 @@ function StatTile({ icon, label, value, sub, loading, colors }) {
         </Box>
       </Box>
 
-      <Box sx={{ mt: 1 }}>
+      <Box sx={{ mt: 1, minWidth: 0 }}>
         {loading ? (
           <Skeleton width={68} height={40} />
         ) : (
-          <Typography sx={{ fontSize: '28px', fontWeight: 800, color: colors.primary, letterSpacing: '-0.8px', lineHeight: 1.15 }}>
-            {value}
-          </Typography>
+          <Tooltip title={isStringVal ? value : ''} arrow disableHoverListener={!isLongVal}>
+            <Typography
+              noWrap
+              sx={{
+                fontSize: isLongVal ? '20px' : '28px',
+                fontWeight: 800,
+                color: colors.primary,
+                letterSpacing: '-0.8px',
+                lineHeight: 1.15
+              }}
+            >
+              {value}
+            </Typography>
+          </Tooltip>
         )}
         {!loading && sub && (
           <Typography noWrap sx={{ fontSize: '11.5px', color: colors.textMuted, mt: 0.5, lineHeight: 1.35 }}>
@@ -132,21 +150,59 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [extraMetrics, setExtraMetrics] = useState({
+    totalRevenue: 0,
+    topStudentName: '',
+    topStudentCount: 0
+  });
 
-  // ── Fetch Dashboard Data from wms.sp_AdminDashboard ────────────────
+  // ── Fetch Dashboard Data from wms.sp_AdminDashboard & Supporting APIs ──
   const loadDashboardData = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
 
     try {
-      const res = await dashboardService.getStats();
-      if (res.data?.success) {
-        setData(res.data.data);
-        setLastUpdated(new Date());
-        if (isManualRefresh) toast.success('Dashboard metrics refreshed');
-      } else {
-        toast.error(res.data?.message || 'Failed to load dashboard data');
+      const [dashRes, paymentsRes, participantsRes] = await Promise.allSettled([
+        dashboardService.getStats(),
+        webinarService.getPayments(),
+        webinarService.getParticipants()
+      ]);
+
+      let stats = null;
+      if (dashRes.status === 'fulfilled' && dashRes.value.data?.success) {
+        stats = dashRes.value.data.data;
+        setData(stats);
       }
+
+      // 1. Calculate Total Revenue (priority from Payments SP, fallback to dashboard summary)
+      let revenue = stats?.summary?.totalRevenue ?? stats?.summary?.estimatedRevenue ?? 0;
+      if (paymentsRes.status === 'fulfilled' && paymentsRes.value.data?.success) {
+        const pData = paymentsRes.value.data.data;
+        if (pData?.totalRevenue != null) {
+          revenue = pData.totalRevenue;
+        }
+      }
+
+      // 2. Calculate Top Attended Student (name + completed count)
+      let topName = stats?.summary?.topAttendedStudentName || '';
+      let topCount = stats?.summary?.topAttendedStudentCount || 0;
+
+      if (participantsRes.status === 'fulfilled' && participantsRes.value.data?.success) {
+        const pList = participantsRes.value.data.data || [];
+        if (pList.length > 0 && pList[0].completedCount > 0) {
+          topName = pList[0].fullName || pList[0].email || 'Top Student';
+          topCount = pList[0].completedCount || 0;
+        }
+      }
+
+      setExtraMetrics({
+        totalRevenue: revenue,
+        topStudentName: topName,
+        topStudentCount: topCount
+      });
+
+      setLastUpdated(new Date());
+      if (isManualRefresh) toast.success('Dashboard metrics refreshed');
     } catch (err) {
       console.error('Failed to load dashboard:', err);
       toast.error('Unable to fetch live dashboard telemetry');
@@ -199,10 +255,25 @@ export default function AdminDashboard() {
 
   const tiles = [
     {
+      label: 'Total Revenue',
+      value: `₹${Number(extraMetrics.totalRevenue || 0).toLocaleString('en-IN')}`,
+      sub: `${summary.paidWebinars ?? 0} paid sessions monetized`,
+      icon: <PaymentsIcon sx={{ fontSize: 20 }} />,
+      onClick: () => navigate('/admin/payments')
+    },
+    {
+      label: 'Most Attended Student',
+      value: extraMetrics.topStudentName || 'No completions yet',
+      sub: extraMetrics.topStudentCount > 0 ? `${extraMetrics.topStudentCount} ${extraMetrics.topStudentCount === 1 ? 'webinar' : 'webinars'} completed` : '0 completed',
+      icon: <MilitaryTechIcon sx={{ fontSize: 20 }} />,
+      onClick: () => navigate('/admin/participants')
+    },
+    {
       label: 'Total Webinars',
       value: summary.totalWebinars ?? 0,
       sub: `${summary.upcomingWebinars ?? 0} upcoming · ${summary.completedWebinars ?? 0} done`,
-      icon: <VideoCameraFrontIcon sx={{ fontSize: 20 }} />
+      icon: <VideoCameraFrontIcon sx={{ fontSize: 20 }} />,
+      onClick: () => navigate('/admin/webinars')
     },
     {
       label: 'Students',
@@ -214,25 +285,28 @@ export default function AdminDashboard() {
       label: 'Participation',
       value: summary.totalParticipation ?? 0,
       sub: `${summary.totalAttended ?? 0} attended · ${fmtDuration(summary.avgAttendedDurationSeconds)} avg`,
-      icon: <BoltIcon sx={{ fontSize: 20 }} />
+      icon: <BoltIcon sx={{ fontSize: 20 }} />,
+      onClick: () => navigate('/admin/participants')
     },
     {
       label: 'Certificates',
       value: summary.totalCertificates ?? 0,
       sub: `${summary.activeCertificates ?? 0} active · ${summary.totalCertificatesIssued ?? 0} issued`,
-      icon: <WorkspacePremiumIcon sx={{ fontSize: 20 }} />
+      icon: <WorkspacePremiumIcon sx={{ fontSize: 20 }} />,
+      onClick: () => navigate('/admin/certifications')
+    },
+    {
+      label: 'Registrations',
+      value: summary.totalRegistrations ?? 0,
+      sub: `${summary.totalCategories ?? 0} categories`,
+      icon: <HowToRegIcon sx={{ fontSize: 20 }} />
     },
     {
       label: 'Admin Staff',
       value: summary.totalAdmins ?? 0,
       sub: `+${summary.totalSuperAdmins ?? 0} super admin · ${summary.totalUsers ?? 0} total`,
-      icon: <AdminPanelSettingsIcon sx={{ fontSize: 20 }} />
-    },
-    {
-      label: 'Registrations',
-      value: summary.totalRegistrations ?? 0,
-      sub: `${summary.totalCategories ?? 0} categories${summary.estimatedRevenue > 0 ? ` · ₹${summary.estimatedRevenue}` : ''}`,
-      icon: <HowToRegIcon sx={{ fontSize: 20 }} />
+      icon: <AdminPanelSettingsIcon sx={{ fontSize: 20 }} />,
+      onClick: () => navigate('/admin/accounts')
     }
   ];
 
@@ -327,7 +401,7 @@ export default function AdminDashboard() {
               LIVE DASHBOARD TELEMETRY
             </Box>
 
-            <Typography sx={{ fontSize: { xs: '22px', sm: '26px' }, fontWeight: 800, color: colors.primary, letterSpacing: '-0.5px', lineHeight: 1.2 }}>
+            <Typography sx={{ fontSize: { xs: '22px', sm: '26px' }, fontWeight: 750, color: colors.primary, letterSpacing: '-0.5px', lineHeight: 1.2 }}>
               Welcome back, <Box component="span" sx={{ color: GOLD_DEEP }}>Admin</Box>!
             </Typography>
             <Typography sx={{ color: colors.textMuted, fontSize: '13.5px', mt: 0.5, maxWidth: 620 }}>
@@ -339,6 +413,54 @@ export default function AdminDashboard() {
 
             {/* Quick telemetry indicators */}
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
+              <Box
+                onClick={() => navigate('/admin/payments')}
+                sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 0.6,
+                  px: 1.25,
+                  py: 0.45,
+                  borderRadius: '999px',
+                  bgcolor: colors.surfaceAlt || '#f8fafc',
+                  border: `1px solid ${colors.border}`,
+                  color: colors.primary,
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  '&:hover': { borderColor: GOLD, bgcolor: GOLD_SOFT }
+                }}
+              >
+                <PaymentsIcon sx={{ fontSize: 14, color: GOLD_DEEP }} />
+                ₹{Number(extraMetrics.totalRevenue || 0).toLocaleString('en-IN')} revenue
+              </Box>
+
+              {extraMetrics.topStudentName && (
+                <Box
+                  onClick={() => navigate('/admin/participants')}
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.6,
+                    px: 1.25,
+                    py: 0.45,
+                    borderRadius: '999px',
+                    bgcolor: GOLD_SOFT,
+                    border: `1px solid ${GOLD}40`,
+                    color: GOLD_DEEP,
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    '&:hover': { borderColor: GOLD }
+                  }}
+                >
+                  <MilitaryTechIcon sx={{ fontSize: 15, color: GOLD_DEEP }} />
+                  Top: {extraMetrics.topStudentName} ({extraMetrics.topStudentCount} attended)
+                </Box>
+              )}
+
               <Box
                 sx={{
                   display: 'inline-flex',
@@ -454,7 +576,7 @@ export default function AdminDashboard() {
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0,1fr))', md: 'repeat(3, minmax(0,1fr))', xl: 'repeat(6, minmax(0,1fr))' },
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))', xl: 'repeat(4, minmax(0,1fr))' },
           gap: 2,
           mb: 3
         }}
@@ -489,11 +611,11 @@ export default function AdminDashboard() {
 
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
-                <Box sx={{ width: 12, height: 12, borderRadius: '4px', background: 'linear-gradient(180deg, #F59E0B 0%, #D97706 100%)' }} />
+                <Box sx={{ width: 12, height: 12, borderRadius: '4px', background: CHART_PILLARS.primary.gradient }} />
                 <Typography sx={{ fontSize: '12px', fontWeight: 600, color: colors.primary }}>Total registration</Typography>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
-                <Box sx={{ width: 12, height: 12, borderRadius: '4px', background: 'linear-gradient(180deg, #10B981 0%, #059669 100%)' }} />
+                <Box sx={{ width: 12, height: 12, borderRadius: '4px', background: CHART_PILLARS.secondary.gradient }} />
                 <Typography sx={{ fontSize: '12px', fontWeight: 600, color: colors.primary }}>Completed webinar</Typography>
               </Box>
             </Box>
@@ -552,11 +674,11 @@ export default function AdminDashboard() {
                               <Typography sx={{ fontSize: '12px', fontWeight: 700, mb: 0.5 }}>{w.webinarName}</Typography>
                               <Typography sx={{ fontSize: '11px', color: '#fef3c7' }}>Category: {w.categoryName}</Typography>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                                <Box sx={{ width: 8, height: 8, borderRadius: '2px', bgcolor: '#F59E0B' }} />
+                                <Box sx={{ width: 8, height: 8, borderRadius: '2px', bgcolor: CHART_PILLARS.primary.main }} />
                                 <Typography sx={{ fontSize: '11px' }}>Total registration: <strong>{regCount}</strong></Typography>
                               </Box>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.25 }}>
-                                <Box sx={{ width: 8, height: 8, borderRadius: '2px', bgcolor: '#10B981' }} />
+                                <Box sx={{ width: 8, height: 8, borderRadius: '2px', bgcolor: CHART_PILLARS.secondary.main }} />
                                 <Typography sx={{ fontSize: '11px' }}>Completed webinar: <strong>{compCount}</strong></Typography>
                               </Box>
                               <Typography sx={{ fontSize: '10.5px', color: '#fde68a', mt: 0.5 }}>Turnout rate: {rate}%</Typography>
@@ -586,9 +708,9 @@ export default function AdminDashboard() {
                                   height: `${Math.max(regPct, regCount > 0 ? 8 : 4)}%`,
                                   borderRadius: '9px 9px 3px 3px',
                                   background: regCount > 0
-                                    ? 'linear-gradient(180deg, #F59E0B 0%, #D97706 100%)'
-                                    : `repeating-linear-gradient(135deg, ${GOLD_SOFT} 0 4px, #fffbeb 4px 8px)`,
-                                  boxShadow: regCount > 0 ? '0 8px 18px -8px rgba(245, 158, 11, 0.7)' : 'none',
+                                    ? CHART_PILLARS.primary.gradient
+                                    : CHART_PILLARS.primary.emptyGradient,
+                                  boxShadow: regCount > 0 ? CHART_PILLARS.primary.shadow : 'none',
                                   transition: 'all 0.2s ease',
                                   '&:hover': { filter: 'brightness(1.08)', transform: 'translateY(-2px)' }
                                 }}
@@ -602,12 +724,13 @@ export default function AdminDashboard() {
                                     px: 0.75,
                                     py: 0.15,
                                     borderRadius: '999px',
-                                    bgcolor: '#FEF3C7',
-                                    color: '#B45309',
+                                    bgcolor: CHART_PILLARS.primary.pillBg,
+                                    color: CHART_PILLARS.primary.pillText,
                                     fontSize: '11px',
                                     fontWeight: 700,
                                     lineHeight: 1.2,
-                                    zIndex: 2
+                                    zIndex: 2,
+                                    whiteSpace: 'nowrap'
                                   }}
                                 >
                                   {regCount}
@@ -623,9 +746,9 @@ export default function AdminDashboard() {
                                   height: `${Math.max(compPct, compCount > 0 ? 8 : 4)}%`,
                                   borderRadius: '9px 9px 3px 3px',
                                   background: compCount > 0
-                                    ? 'linear-gradient(180deg, #10B981 0%, #059669 100%)'
-                                    : 'repeating-linear-gradient(135deg, #E6F4EA 0 4px, #f0fdf4 4px 8px)',
-                                  boxShadow: compCount > 0 ? '0 8px 18px -8px rgba(16, 185, 129, 0.7)' : 'none',
+                                    ? CHART_PILLARS.secondary.gradient
+                                    : CHART_PILLARS.secondary.emptyGradient,
+                                  boxShadow: compCount > 0 ? CHART_PILLARS.secondary.shadow : 'none',
                                   transition: 'all 0.2s ease',
                                   '&:hover': { filter: 'brightness(1.08)', transform: 'translateY(-2px)' }
                                 }}
@@ -639,12 +762,13 @@ export default function AdminDashboard() {
                                     px: 0.75,
                                     py: 0.15,
                                     borderRadius: '999px',
-                                    bgcolor: '#D1FAE5',
-                                    color: '#065F46',
+                                    bgcolor: CHART_PILLARS.secondary.pillBg,
+                                    color: CHART_PILLARS.secondary.pillText,
                                     fontSize: '11px',
                                     fontWeight: 700,
                                     lineHeight: 1.2,
-                                    zIndex: 2
+                                    zIndex: 2,
+                                    whiteSpace: 'nowrap'
                                   }}
                                 >
                                   {compCount}
@@ -660,28 +784,31 @@ export default function AdminDashboard() {
 
                 {/* X axis labels */}
                 <Box sx={{ display: 'flex', gap: 1.5, mt: 1.5, justifyContent: 'space-evenly' }}>
-                  {recentWebinars.map((w) => (
-                    <Box key={w.id} sx={{ flex: '1 1 0', minWidth: 70, maxWidth: 120, textAlign: 'center' }}>
-                      <Tooltip title={w.webinarName} arrow>
+                  {recentWebinars.map((w) => {
+                    const isEnded = Boolean(w.isCompleted) || (w.endTime && new Date(w.endTime) < new Date());
+                    return (
+                      <Box key={w.id} sx={{ flex: '1 1 0', minWidth: 70, maxWidth: 120, textAlign: 'center' }}>
+                        <Tooltip title={w.webinarName} arrow>
+                          <Typography
+                            noWrap
+                            sx={{ fontSize: '12px', fontWeight: 600, color: colors.primary, cursor: 'default', '&:hover': { color: GOLD_DEEP } }}
+                          >
+                            {w.webinarName}
+                          </Typography>
+                        </Tooltip>
                         <Typography
                           noWrap
-                          sx={{ fontSize: '12px', fontWeight: 600, color: colors.primary, cursor: 'default', '&:hover': { color: GOLD_DEEP } }}
+                          sx={{
+                            fontSize: '10.5px',
+                            color: isEnded ? '#059669' : colors.textMuted,
+                            fontWeight: isEnded ? 600 : 500
+                          }}
                         >
-                          {w.webinarName}
+                          {isEnded ? 'Completed' : 'Upcoming'}
                         </Typography>
-                      </Tooltip>
-                      <Typography
-                        noWrap
-                        sx={{
-                          fontSize: '10.5px',
-                          color: w.isCompleted ? '#059669' : colors.textMuted,
-                          fontWeight: w.isCompleted ? 600 : 500
-                        }}
-                      >
-                        {w.isCompleted ? 'Completed' : 'Upcoming'}
-                      </Typography>
-                    </Box>
-                  ))}
+                      </Box>
+                    );
+                  })}
                 </Box>
               </Box>
             </Box>
@@ -701,6 +828,58 @@ export default function AdminDashboard() {
               See all
             </Typography>
           </Box>
+
+          {/* Top Attendee Spotlight Banner */}
+          {extraMetrics.topStudentName && (
+            <Box
+              onClick={() => navigate('/admin/participants')}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 1.5,
+                p: 1.5,
+                mb: 2,
+                borderRadius: '12px',
+                bgcolor: GOLD_SOFT,
+                border: `1px solid ${GOLD}40`,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': { borderColor: GOLD, transform: 'translateY(-1px)' }
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
+                <Box
+                  sx={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: '8px',
+                    bgcolor: GOLD,
+                    color: INK,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}
+                >
+                  <MilitaryTechIcon sx={{ fontSize: 20 }} />
+                </Box>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 800, color: GOLD_DEEP, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Most Webinars Attended
+                  </Typography>
+                  <Typography noWrap sx={{ fontSize: '13.5px', fontWeight: 800, color: colors.primary }}>
+                    {extraMetrics.topStudentName}
+                  </Typography>
+                </Box>
+              </Box>
+              <Chip
+                label={`${extraMetrics.topStudentCount} ${extraMetrics.topStudentCount === 1 ? 'webinar' : 'webinars'}`}
+                size="small"
+                sx={{ bgcolor: '#fff', color: GOLD_DEEP, fontWeight: 700, fontSize: '11px', border: `1px solid ${GOLD}50`, flexShrink: 0 }}
+              />
+            </Box>
+          )}
 
           <Box sx={{ flex: 1 }}>
             {loading ? (

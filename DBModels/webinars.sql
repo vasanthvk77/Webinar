@@ -48,6 +48,7 @@ BEGIN
         IsCompleted      BIT NOT NULL
             CONSTRAINT DF_Webinars_IsCompleted DEFAULT 0,
         ModeratorJoinUrl NVARCHAR(2000) NULL,
+        ImageUrl         NVARCHAR(500) NULL,
         CreatedAt        DATETIME2(0) NOT NULL
             CONSTRAINT DF_Webinars_CreatedAt DEFAULT GETDATE(),
         CreatedBy        INT NULL
@@ -153,6 +154,18 @@ BEGIN
 END
 GO
 
+-- Ensure ImageUrl column exists on wms.Webinars
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Webinars' AND s.name = 'wms' AND c.name = 'ImageUrl'
+)
+BEGIN
+    ALTER TABLE wms.Webinars ADD ImageUrl NVARCHAR(500) NULL;
+END
+GO
+
 -- Synchronize existing completed webinars if attendance was already recorded
 IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WebinarCompleted' AND schema_id = SCHEMA_ID('wms'))
 BEGIN
@@ -197,6 +210,60 @@ BEGIN
 END
 GO
 
+-- Ensure CustomUserId column exists on wms.WebinarRegistrations
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'WebinarRegistrations' AND s.name = 'wms' AND c.name = 'CustomUserId'
+)
+BEGIN
+    ALTER TABLE wms.WebinarRegistrations ADD CustomUserId NVARCHAR(100) NULL;
+END
+GO
+
+-- Backfill any existing registrations where CustomUserId is NULL
+UPDATE wr
+SET wr.CustomUserId = 'UserId - ' + SUBSTRING(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 1, 8)
+FROM wms.WebinarRegistrations wr
+WHERE wr.CustomUserId IS NULL;
+GO
+
+-- ============================================================
+-- TABLE: wms.WebinarRegistrationHolds
+-- High-concurrency seat locking / reservation hold ledger
+-- ============================================================
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'WebinarRegistrationHolds' AND s.name = 'wms'
+)
+BEGIN
+    CREATE TABLE wms.WebinarRegistrationHolds
+    (
+        Id              BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_WebinarRegistrationHolds PRIMARY KEY,
+        WebinarId       BIGINT NOT NULL
+            CONSTRAINT FK_WebinarRegistrationHolds_Webinars
+                FOREIGN KEY REFERENCES wms.Webinars(Id) ON DELETE CASCADE,
+        UserId          INT NOT NULL
+            CONSTRAINT FK_WebinarRegistrationHolds_Users
+                FOREIGN KEY REFERENCES wms.Users(Id),
+        HoldToken       UNIQUEIDENTIFIER NOT NULL
+            CONSTRAINT DF_WebinarRegistrationHolds_HoldToken DEFAULT NEWID(),
+        Status          VARCHAR(20) NOT NULL
+            CONSTRAINT DF_WebinarRegistrationHolds_Status DEFAULT 'HELD', -- 'HELD', 'CONFIRMED', 'EXPIRED', 'RELEASED'
+        ExpiresAt       DATETIME2(0) NOT NULL,
+        CreatedAt       DATETIME2(0) NOT NULL
+            CONSTRAINT DF_WebinarRegistrationHolds_CreatedAt DEFAULT SYSUTCDATETIME(),
+        ConfirmedAt     DATETIME2(0) NULL
+    );
+
+    CREATE INDEX IX_WebinarRegistrationHolds_Webinar_Status ON wms.WebinarRegistrationHolds(WebinarId, Status, ExpiresAt);
+    CREATE UNIQUE INDEX IX_WebinarRegistrationHolds_Token ON wms.WebinarRegistrationHolds(HoldToken);
+END
+GO
+
 -- ============================================================
 -- TABLE: wms.EmailQueue
 -- ============================================================
@@ -216,6 +283,9 @@ BEGIN
         UserId    INT NOT NULL
             CONSTRAINT FK_EmailQueue_Users
                 FOREIGN KEY REFERENCES wms.Users(Id),
+        EmailType VARCHAR(50) NOT NULL
+            CONSTRAINT DF_EmailQueue_EmailType DEFAULT 'WEBINAR_INVITE',
+        JoinLink  NVARCHAR(2000) NULL,
         IsSent    BIT NULL
             CONSTRAINT DF_EmailQueue_IsSent DEFAULT NULL,
         TimeSent  INT NOT NULL
@@ -224,10 +294,58 @@ BEGIN
             CONSTRAINT DF_EmailQueue_CreatedAt DEFAULT GETUTCDATE(),
         SentAt    DATETIME2(0) NULL,
 
-        CONSTRAINT UQ_EmailQueue_Webinar_User UNIQUE (WebinarId, UserId)
+        CONSTRAINT UQ_EmailQueue_Webinar_User_Type UNIQUE (WebinarId, UserId, EmailType)
     );
 
     CREATE INDEX IX_EmailQueue_IsSent ON wms.EmailQueue(IsSent, WebinarId);
+END
+GO
+
+-- Migration Guard: Ensure EmailType column exists on wms.EmailQueue
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'EmailQueue' AND schema_id = SCHEMA_ID('wms'))
+AND NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'EmailQueue' AND s.name = 'wms' AND c.name = 'EmailType'
+)
+BEGIN
+    ALTER TABLE wms.EmailQueue ADD EmailType VARCHAR(50) NOT NULL CONSTRAINT DF_EmailQueue_EmailType DEFAULT 'WEBINAR_INVITE';
+END
+GO
+
+-- Migration Guard: Ensure JoinLink column exists on wms.EmailQueue
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'EmailQueue' AND schema_id = SCHEMA_ID('wms'))
+AND NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'EmailQueue' AND s.name = 'wms' AND c.name = 'JoinLink'
+)
+BEGIN
+    ALTER TABLE wms.EmailQueue ADD JoinLink NVARCHAR(2000) NULL;
+END
+GO
+
+-- Migration Guard: Upgrade UNIQUE constraint to (WebinarId, UserId, EmailType)
+IF EXISTS (
+    SELECT 1 FROM sys.key_constraints kc
+    JOIN sys.tables t ON kc.parent_object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'EmailQueue' AND s.name = 'wms' AND kc.name = 'UQ_EmailQueue_Webinar_User'
+)
+BEGIN
+    ALTER TABLE wms.EmailQueue DROP CONSTRAINT UQ_EmailQueue_Webinar_User;
+    
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.key_constraints kc
+        JOIN sys.tables t ON kc.parent_object_id = t.object_id
+        JOIN sys.schemas s ON t.schema_id = s.schema_id
+        WHERE t.name = 'EmailQueue' AND s.name = 'wms' AND kc.name = 'UQ_EmailQueue_Webinar_User_Type'
+    )
+    BEGIN
+        ALTER TABLE wms.EmailQueue ADD CONSTRAINT UQ_EmailQueue_Webinar_User_Type UNIQUE (WebinarId, UserId, EmailType);
+    END
 END
 GO
 
@@ -269,9 +387,11 @@ BEGIN
         w.UpdatedBy,
         uu.FirstName + ISNULL(' ' + uu.LastName, '') AS UpdatedByName,
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
+        CAST((SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount,
         w.IsMeetingCreated,
         w.IsCompleted,
         w.ModeratorJoinUrl,
+        w.ImageUrl,
         m.MeetingID
     FROM wms.Webinars w
     LEFT JOIN wms.Meetings m ON m.WebinarId = w.Id
@@ -316,9 +436,11 @@ BEGIN
         w.CertificateTempId,
         ct.CertificateName AS CertificateTemplateName,
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
+        CAST((SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount,
         w.IsMeetingCreated,
         w.IsCompleted,
         w.ModeratorJoinUrl,
+        w.ImageUrl,
         m.MeetingID
     FROM wms.Webinars w
     LEFT JOIN wms.Meetings m ON m.WebinarId = w.Id
@@ -351,7 +473,8 @@ CREATE PROCEDURE wms.usp_CreateWebinar
     @Price            FLOAT,
     @CreatedBy        INT,
     @ShareId          NVARCHAR(64) = NULL,
-    @CertificateTempId INT = NULL
+    @CertificateTempId INT = NULL,
+    @ImageUrl         NVARCHAR(500) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -380,11 +503,11 @@ BEGIN
     INSERT INTO wms.Webinars
         (WebinarName, CategoryId, DurationMinutes, WebinarDate, StartTime, EndTime,
          ConductorName, ConductorPhone, ConductorEmail, ParticipantLimit,
-         IsPaid, Price, CreatedBy, ShareId, CertificateTempId)
+         IsPaid, Price, CreatedBy, ShareId, CertificateTempId, ImageUrl)
     VALUES
         (@WebinarName, @CategoryId, @DurationMinutes, @WebinarDate, @StartTime, @EndTime,
          @ConductorName, @ConductorPhone, @ConductorEmail, @ParticipantLimit,
-         @IsPaid, CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END, @CreatedBy, @ShareId, @CertificateTempId);
+         @IsPaid, CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END, @CreatedBy, @ShareId, @CertificateTempId, @ImageUrl);
 
     DECLARE @NewId BIGINT = SCOPE_IDENTITY();
 
@@ -416,6 +539,7 @@ BEGIN
         w.IsMeetingCreated,
         w.IsCompleted,
         w.ModeratorJoinUrl,
+        w.ImageUrl,
         NULL AS MeetingID
     FROM wms.Webinars w
     JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
@@ -448,7 +572,8 @@ CREATE PROCEDURE wms.usp_UpdateWebinar
     @IsPaid           BIT,
     @Price            FLOAT,
     @UpdatedBy        INT,
-    @CertificateTempId INT = NULL
+    @CertificateTempId INT = NULL,
+    @ImageUrl         NVARCHAR(500) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -492,6 +617,7 @@ BEGIN
         IsPaid            = @IsPaid,
         Price             = CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END,
         CertificateTempId = @CertificateTempId,
+        ImageUrl          = @ImageUrl,
         UpdatedAt         = GETDATE(),
         UpdatedBy         = @UpdatedBy
     WHERE Id = @Id;
@@ -521,9 +647,11 @@ BEGIN
         w.UpdatedBy,
         uu.FirstName + ISNULL(' ' + uu.LastName, '') AS UpdatedByName,
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
+        CAST((SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount,
         w.IsMeetingCreated,
         w.IsCompleted,
         w.ModeratorJoinUrl,
+        w.ImageUrl,
         m.MeetingID
     FROM wms.Webinars w
     LEFT JOIN wms.Meetings m ON m.WebinarId = w.Id
@@ -605,19 +733,171 @@ END
 GO
 
 -- ============================================================
+-- SP: wms.usp_HoldWebinarSeat
+-- Atomically reserves a seat for a user with dual-clock hold (BookMyShow pattern)
+-- Automatically self-cleans expired holds (Case B)
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_HoldWebinarSeat' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_HoldWebinarSeat;
+GO
+
+CREATE PROCEDURE wms.usp_HoldWebinarSeat
+    @TrackingId NVARCHAR(100),
+    @UserId     INT,
+    @HoldMinutes INT = 6 -- 6 minutes DB hard expiry (allows 60s grace buffer over 5-minute UI timer)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+    DECLARE @WebinarId BIGINT = NULL;
+
+    -- Look up by ShareId first
+    SELECT @WebinarId = Id FROM wms.Webinars WHERE ShareId = @TrackingId;
+
+    -- If not found and TrackingId is numeric, look up by Id
+    IF @WebinarId IS NULL AND ISNUMERIC(@TrackingId) = 1
+    BEGIN
+        SELECT @WebinarId = Id FROM wms.Webinars WHERE Id = CAST(@TrackingId AS BIGINT);
+    END
+
+    IF @WebinarId IS NULL
+    BEGIN
+        SELECT 0 AS Success, 'Webinar not found.' AS Message, NULL AS HoldToken, NULL AS ExpiresAt, 0 AS RemainingSeconds, 0 AS WebinarId, NULL AS WebinarName, 0 AS RemainingSlots, 1 AS IsCapacityFull;
+        RETURN;
+    END
+
+    -- Check if user exists
+    IF NOT EXISTS (SELECT 1 FROM wms.Users WHERE Id = @UserId)
+    BEGIN
+        SELECT 0 AS Success, 'User not found.' AS Message, NULL AS HoldToken, NULL AS ExpiresAt, 0 AS RemainingSeconds, @WebinarId AS WebinarId, NULL AS WebinarName, 0 AS RemainingSlots, 1 AS IsCapacityFull;
+        RETURN;
+    END
+
+    -- Check if user is already permanently registered
+    IF EXISTS (SELECT 1 FROM wms.WebinarRegistrations WHERE WebinarId = @WebinarId AND UserId = @UserId)
+    BEGIN
+        SELECT 0 AS Success, 'You are already registered for this webinar.' AS Message, NULL AS HoldToken, NULL AS ExpiresAt, 0 AS RemainingSeconds, @WebinarId AS WebinarId, (SELECT WebinarName FROM wms.Webinars WHERE Id = @WebinarId) AS WebinarName, 0 AS RemainingSlots, 0 AS IsCapacityFull;
+        RETURN;
+    END
+
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- 1. Self-Cleaning: Expire any past holds for this webinar right now
+        UPDATE wms.WebinarRegistrationHolds
+        SET Status = 'EXPIRED'
+        WHERE WebinarId = @WebinarId 
+          AND Status = 'HELD' 
+          AND ExpiresAt <= SYSUTCDATETIME();
+
+        -- 2. Lock the webinar row using ROWLOCK, UPDLOCK (prevents concurrent overselling)
+        DECLARE @Limit INT, @WName NVARCHAR(250);
+        SELECT @Limit = ParticipantLimit, @WName = WebinarName 
+        FROM wms.Webinars WITH (ROWLOCK, UPDLOCK)
+        WHERE Id = @WebinarId;
+
+        -- 3. Calculate currently occupied count (Permanent Registrations + Active Unexpired Holds by other users)
+        DECLARE @PermanentCount INT;
+        SELECT @PermanentCount = COUNT(1) FROM wms.WebinarRegistrations WHERE WebinarId = @WebinarId;
+
+        DECLARE @ActiveHoldsCount INT;
+        SELECT @ActiveHoldsCount = COUNT(1) 
+        FROM wms.WebinarRegistrationHolds 
+        WHERE WebinarId = @WebinarId 
+          AND Status = 'HELD' 
+          AND ExpiresAt > SYSUTCDATETIME()
+          AND UserId <> @UserId;
+
+        DECLARE @Occupied INT = @PermanentCount + @ActiveHoldsCount;
+        DECLARE @RemainingSlots INT = @Limit - @Occupied;
+        IF @RemainingSlots < 0 SET @RemainingSlots = 0;
+
+        IF @Occupied >= @Limit
+        BEGIN
+            ROLLBACK TRANSACTION;
+            SELECT 0 AS Success, 'Webinar capacity reached / Sold Out.' AS Message, NULL AS HoldToken, NULL AS ExpiresAt, 0 AS RemainingSeconds, @WebinarId AS WebinarId, @WName AS WebinarName, 0 AS RemainingSlots, 1 AS IsCapacityFull;
+            RETURN;
+        END
+
+        -- 4. Check if this user ALREADY has an active, unexpired hold for this webinar
+        DECLARE @ExistingToken UNIQUEIDENTIFIER, @ExistingExpires DATETIME2(0);
+        SELECT TOP 1 @ExistingToken = HoldToken, @ExistingExpires = ExpiresAt
+        FROM wms.WebinarRegistrationHolds
+        WHERE WebinarId = @WebinarId 
+          AND UserId = @UserId 
+          AND Status = 'HELD' 
+          AND ExpiresAt > SYSUTCDATETIME();
+
+        IF @ExistingToken IS NOT NULL
+        BEGIN
+            COMMIT TRANSACTION;
+            DECLARE @RemSec INT = DATEDIFF(SECOND, SYSUTCDATETIME(), @ExistingExpires) - 60;
+            IF @RemSec < 0 SET @RemSec = 0;
+            IF @RemSec > 300 SET @RemSec = 300;
+
+            SELECT 
+                1 AS Success, 
+                'Seat reservation resumed.' AS Message, 
+                CONVERT(NVARCHAR(50), @ExistingToken) AS HoldToken, 
+                @ExistingExpires AS ExpiresAt, 
+                @RemSec AS RemainingSeconds,
+                @WebinarId AS WebinarId, 
+                @WName AS WebinarName,
+                @RemainingSlots AS RemainingSlots,
+                0 AS IsCapacityFull;
+            RETURN;
+        END
+
+        -- 5. Invalidate any stale/previous holds for this user
+        UPDATE wms.WebinarRegistrationHolds
+        SET Status = 'RELEASED'
+        WHERE WebinarId = @WebinarId AND UserId = @UserId AND Status = 'HELD';
+
+        -- 6. Create new Hold with 6-minute DB hard expiry
+        DECLARE @HoldToken UNIQUEIDENTIFIER = NEWID();
+        DECLARE @ExpiresAt DATETIME2(0) = DATEADD(minute, @HoldMinutes, SYSUTCDATETIME());
+
+        INSERT INTO wms.WebinarRegistrationHolds (WebinarId, UserId, HoldToken, Status, ExpiresAt, CreatedAt)
+        VALUES (@WebinarId, @UserId, @HoldToken, 'HELD', @ExpiresAt, SYSUTCDATETIME());
+
+        COMMIT TRANSACTION;
+
+        SELECT 
+            1 AS Success, 
+            'Seat reserved for 5 minutes. Please complete registration before the timer expires.' AS Message, 
+            CONVERT(NVARCHAR(50), @HoldToken) AS HoldToken, 
+            @ExpiresAt AS ExpiresAt, 
+            300 AS RemainingSeconds, -- UI timer is strictly 5 minutes (300s)
+            @WebinarId AS WebinarId, 
+            @WName AS WebinarName,
+            (@RemainingSlots - 1) AS RemainingSlots,
+            0 AS IsCapacityFull;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END
+GO
+
+-- ============================================================
 -- SP: wms.usp_RegisterUserForWebinar
 -- Registers a user for a webinar using TrackingId (WebinarId or ShareId)
+-- Validates HoldToken (Case A) and handles atomic confirmation
 -- ============================================================
 IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_RegisterUserForWebinar' AND s.name = 'wms')
     DROP PROCEDURE wms.usp_RegisterUserForWebinar;
 GO
 
 CREATE PROCEDURE wms.usp_RegisterUserForWebinar
-    @TrackingId NVARCHAR(100),
-    @UserId     INT
+    @TrackingId   NVARCHAR(100),
+    @UserId       INT,
+    @CustomUserId NVARCHAR(100) = NULL,
+    @HoldToken    NVARCHAR(100) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
+    SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 
     DECLARE @WebinarId BIGINT = NULL;
 
@@ -650,21 +930,73 @@ BEGIN
         RETURN;
     END
 
-    -- Check participant limit
-    DECLARE @Limit INT, @CurrentCount INT, @WName NVARCHAR(250);
-    SELECT @Limit = ParticipantLimit, @WName = WebinarName FROM wms.Webinars WHERE Id = @WebinarId;
-    SELECT @CurrentCount = COUNT(1) FROM wms.WebinarRegistrations WHERE WebinarId = @WebinarId;
+    DECLARE @WName NVARCHAR(250), @Limit INT;
+    SELECT @WName = WebinarName, @Limit = ParticipantLimit FROM wms.Webinars WHERE Id = @WebinarId;
 
-    IF @CurrentCount >= @Limit
-    BEGIN
-        SELECT 0 AS Success, 'Webinar participant limit has been reached.' AS Message, @WName AS WebinarName;
-        RETURN;
-    END
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- Case A Verification: If a HoldToken was provided, verify it is still active and valid
+        IF @HoldToken IS NOT NULL AND LEN(@HoldToken) > 0
+        BEGIN
+            DECLARE @HoldId BIGINT = NULL;
+            SELECT @HoldId = Id 
+            FROM wms.WebinarRegistrationHolds WITH (UPDLOCK, ROWLOCK)
+            WHERE WebinarId = @WebinarId 
+              AND UserId = @UserId 
+              AND HoldToken = CAST(@HoldToken AS UNIQUEIDENTIFIER)
+              AND Status = 'HELD' 
+              AND ExpiresAt > SYSUTCDATETIME();
 
-    INSERT INTO wms.WebinarRegistrations (WebinarId, UserId, CreatedDateTime)
-    VALUES (@WebinarId, @UserId, GETUTCDATE());
+            IF @HoldId IS NULL
+            BEGIN
+                ROLLBACK TRANSACTION;
+                SELECT 0 AS Success, 'Your seat reservation hold has expired. Please reserve your seat again.' AS Message, @WName AS WebinarName;
+                RETURN;
+            END
 
-    SELECT 1 AS Success, 'Successfully registered for webinar!' AS Message, @WName AS WebinarName;
+            -- Mark the hold as CONFIRMED
+            UPDATE wms.WebinarRegistrationHolds
+            SET Status = 'CONFIRMED', ConfirmedAt = SYSUTCDATETIME()
+            WHERE Id = @HoldId;
+        END
+        ELSE
+        BEGIN
+            -- Fallback direct registration (checks limit under lock)
+            UPDATE wms.WebinarRegistrationHolds
+            SET Status = 'EXPIRED'
+            WHERE WebinarId = @WebinarId AND Status = 'HELD' AND ExpiresAt <= SYSUTCDATETIME();
+
+            DECLARE @CurrentPermanent INT;
+            SELECT @CurrentPermanent = COUNT(1) FROM wms.WebinarRegistrations WITH (UPDLOCK, ROWLOCK) WHERE WebinarId = @WebinarId;
+
+            DECLARE @CurrentHolds INT;
+            SELECT @CurrentHolds = COUNT(1) FROM wms.WebinarRegistrationHolds WHERE WebinarId = @WebinarId AND Status = 'HELD' AND ExpiresAt > SYSUTCDATETIME();
+
+            IF (@CurrentPermanent + @CurrentHolds) >= @Limit
+            BEGIN
+                ROLLBACK TRANSACTION;
+                SELECT 0 AS Success, 'Webinar participant limit has been reached.' AS Message, @WName AS WebinarName;
+                RETURN;
+            END
+        END
+
+        -- Fallback CustomUserId if not passed
+        IF @CustomUserId IS NULL OR LEN(LTRIM(RTRIM(@CustomUserId))) = 0
+        BEGIN
+            SET @CustomUserId = 'UserId - ' + SUBSTRING(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 1, 8);
+        END
+
+        -- Insert permanent registration with CustomUserId
+        INSERT INTO wms.WebinarRegistrations (WebinarId, UserId, CustomUserId, CreatedDateTime)
+        VALUES (@WebinarId, @UserId, @CustomUserId, SYSUTCDATETIME());
+
+        COMMIT TRANSACTION;
+        SELECT 1 AS Success, 'Successfully registered for webinar!' AS Message, @WName AS WebinarName;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
 END
 GO
 
@@ -687,6 +1019,8 @@ BEGIN
         eq.WebinarId,
         eq.UserId,
         eq.TimeSent,
+        ISNULL(eq.EmailType, 'WEBINAR_INVITE') AS EmailType,
+        eq.JoinLink,
         u.Email AS RecipientEmail,
         u.FirstName AS RecipientFirstName,
         u.LastName AS RecipientLastName,
@@ -825,6 +1159,7 @@ BEGIN
             uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
             w.UpdatedAt,
             w.UpdatedBy,
+            w.ImageUrl,
             (SELECT COUNT(1) FROM wms.WebinarRegistrations wrg WHERE wrg.WebinarId = w.Id) AS RegistrationCount,
             CASE WHEN wr.Id IS NOT NULL THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsRegistered,
             wr.CreatedDateTime AS RegisteredAt,
@@ -834,6 +1169,7 @@ BEGIN
         LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
         LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
         LEFT JOIN wms.WebinarRegistrations wr ON wr.WebinarId = w.Id AND wr.UserId = @StudentId
+        WHERE w.EndTime >= SYSUTCDATETIME() AND w.IsCompleted = 0
         ORDER BY w.WebinarDate ASC, w.StartTime ASC;
 
         RETURN;
@@ -882,6 +1218,7 @@ BEGIN
             uc.FirstName + ISNULL(' ' + uc.LastName, '') AS CreatedByName,
             w.UpdatedAt,
             w.UpdatedBy,
+            w.ImageUrl,
             (SELECT COUNT(1) FROM wms.WebinarRegistrations wrg WHERE wrg.WebinarId = w.Id) AS RegistrationCount,
             CAST(1 AS BIT) AS IsRegistered,
             wr.CreatedDateTime AS RegisteredAt,
@@ -1001,6 +1338,9 @@ BEGIN
         w.ConductorName,
         w.ConductorEmail,
         w.ShareId,
+        w.ImageUrl,
+        w.IsPaid,
+        w.Price,
         w.CertificateTempId,
         ct.CertificateName AS CertificateTemplateName,
         ct.TemplateImageUrl,
@@ -1127,6 +1467,137 @@ BEGIN
     INNER JOIN wms.Users u ON u.Id = wr.UserId
     WHERE wr.WebinarId = @WebinarId
     ORDER BY wc.CreatedAt DESC, wc.Id DESC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.GetParticipants
+-- Purpose : View completed participants grouped by User.
+-- Flow    : WebinarCompleted -> WebinarRegistrations -> Users.
+--           Shows user name and their completed webinars count (CompletedCount).
+--           Ordered by CompletedCount DESC (big number to small).
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'GetParticipants' AND s.name = 'wms')
+    DROP PROCEDURE wms.GetParticipants;
+GO
+
+CREATE PROCEDURE wms.GetParticipants
+    @WebinarId BIGINT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        u.Id AS UserId,
+        LTRIM(RTRIM(ISNULL(u.FirstName, '') + ' ' + ISNULL(u.LastName, ''))) AS FullName,
+        u.FirstName,
+        u.LastName,
+        u.Email,
+        u.CountryCode,
+        u.MobileNumber,
+        ISNULL(u.CountryCode, '') + ISNULL(u.MobileNumber, '') AS FullPhoneNumber,
+        COUNT(wc.Id) AS CompletedCount,
+        SUM(ISNULL(wc.AttendedDuration, 0)) AS TotalAttendedDuration, -- In seconds
+        SUM(CASE WHEN wc.IsCertificateEligible = 1 THEN 1 ELSE 0 END) AS CertificatesEarned,
+        MAX(wc.CreatedAt) AS LastCompletedAt
+    FROM wms.WebinarCompleted wc
+    INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
+    INNER JOIN wms.Users u ON u.Id = wr.UserId
+    WHERE (@WebinarId IS NULL OR @WebinarId <= 0 OR wr.WebinarId = @WebinarId)
+    GROUP BY
+        u.Id,
+        u.FirstName,
+        u.LastName,
+        u.Email,
+        u.CountryCode,
+        u.MobileNumber
+    ORDER BY COUNT(wc.Id) DESC, LTRIM(RTRIM(ISNULL(u.FirstName, '') + ' ' + ISNULL(u.LastName, ''))) ASC;
+END
+GO
+
+-- Create synonym/fallback in dbo schema if called as dbo.GetParticipants or GetParticipants
+IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'GetParticipants' AND schema_id = SCHEMA_ID('dbo'))
+    DROP PROCEDURE dbo.GetParticipants;
+GO
+
+CREATE PROCEDURE dbo.GetParticipants
+    @WebinarId BIGINT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    EXEC wms.GetParticipants @WebinarId = @WebinarId;
+END
+GO
+
+-- ============================================================
+-- SP: wms.GetPayments
+-- Purpose: Calculate payments and revenue per webinar and overall totals
+-- Logic  : For each webinar, get WebinarId and Amount (Price).
+--          Count registrations from wms.WebinarRegistrations.
+--          Multiply Count * Amount to get TotalAmount per webinar.
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'GetPayments' AND s.name = 'wms')
+    DROP PROCEDURE wms.GetPayments;
+GO
+
+CREATE PROCEDURE wms.GetPayments
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        w.Id AS WebinarId,
+        w.WebinarName,
+        w.CategoryId,
+        c.CategoryName,
+        w.ConductorName,
+        w.WebinarDate,
+        w.StartTime,
+        w.EndTime,
+        w.DurationMinutes,
+        w.IsPaid,
+        ISNULL(w.Price, 0.0) AS Price,
+        w.ParticipantLimit,
+        w.ShareId,
+        w.ImageUrl,
+        w.IsCompleted,
+        w.CreatedAt,
+        COUNT(wr.Id) AS RegistrationCount,
+        CAST(COUNT(wr.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount
+    FROM wms.Webinars w
+    LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    LEFT JOIN wms.WebinarRegistrations wr ON wr.WebinarId = w.Id
+    GROUP BY
+        w.Id,
+        w.WebinarName,
+        w.CategoryId,
+        c.CategoryName,
+        w.ConductorName,
+        w.WebinarDate,
+        w.StartTime,
+        w.EndTime,
+        w.DurationMinutes,
+        w.IsPaid,
+        w.Price,
+        w.ParticipantLimit,
+        w.ShareId,
+        w.ImageUrl,
+        w.IsCompleted,
+        w.CreatedAt
+    ORDER BY w.WebinarDate DESC, w.StartTime DESC;
+END
+GO
+
+-- Create synonym/fallback in dbo schema if called as dbo.GetPayments or GetPayments
+IF EXISTS (SELECT 1 FROM sys.procedures WHERE name = 'GetPayments' AND schema_id = SCHEMA_ID('dbo'))
+    DROP PROCEDURE dbo.GetPayments;
+GO
+
+CREATE PROCEDURE dbo.GetPayments
+AS
+BEGIN
+    SET NOCOUNT ON;
+    EXEC wms.GetPayments;
 END
 GO
 

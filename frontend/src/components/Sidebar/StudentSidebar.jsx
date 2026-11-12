@@ -1,128 +1,114 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box, List, ListItemButton, ListItemText,
-  Typography,
+  Typography, Button,
 } from '@mui/material';
-import studentTabs        from '../../config/studentTabs';
+import LogoutIcon from '@mui/icons-material/Logout';
+import SchoolIcon from '@mui/icons-material/School';
+import studentTabs from '../../config/studentTabs';
 import { useThemeColors, useAppTheme } from '../../context/ThemeContext';
-import logo               from '../../assets/logo1.png';
+import { useAuth } from '../../context/AuthContext';
+import logo from '../../assets/logo1.png';
 
 const SIDEBAR_WIDTH = 240;
 
-// Amber bubble constants — same as AdminSidebar
-const BUBBLE_ACTIVE_BG     = '#FEF3C7';
-const BUBBLE_ACTIVE_ICON   = '#D97706';
-const BUBBLE_ACTIVE_SHADOW = '0 6px 16px rgba(217,119,6,0.35)';
-
 export default function StudentSidebar() {
-  const navigate     = useNavigate();
+  const navigate = useNavigate();
   const { pathname } = useLocation();
   const colors = useThemeColors();
   const { isDark } = useAppTheme();
+  const { logout } = useAuth();
 
   const isActive = (route) => {
     if (route === '/dashboard') return pathname === '/dashboard';
     return pathname.startsWith(route);
   };
 
-  // ── Row sx — same pattern as AdminSidebar ─────────────
-  const rowSx = (active) => ({
-    borderRadius: 2,
-    mb: 0.5,
-    px: 1,
-    py: 0.75,
-    bgcolor: 'transparent',
-    color:   active ? colors.primary : colors.textSecondary,
-    transition: 'color 0.2s ease, transform 0.15s ease',
-
-    // Click: snap right then spring back
-    '&:active': {
-      transform: 'translateX(6px)',
-      transition: 'transform 0.08s ease',
-    },
-
-    // Hover: row shifts right, label slides, bubble pops
-    '&:hover': {
-      bgcolor:   'transparent',
-      color:     colors.primary,
-      transform: 'translateX(3px)',
-      '& .MuiListItemText-primary': {
-        transform:  'translateX(2px)',
-        transition: 'transform 0.35s cubic-bezier(0.34,1.56,0.64,1)',
-      },
-      '& .icon-bubble': {
-        transform:  'scale(1.15)',
-        bgcolor:    BUBBLE_ACTIVE_BG,
-        boxShadow:  active ? BUBBLE_ACTIVE_SHADOW : '0 4px 12px rgba(217,119,6,0.2)',
-        '& .MuiSvgIcon-root': { color: BUBBLE_ACTIVE_ICON },
-      },
-    },
-  });
-
-  // ── Bubble sx — spring bounce ─────────────────────────
-  const bubbleSx = (active) => ({
-    width: 32, height: 32,
-    borderRadius: '50%',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0,
-    mr: 1.25,
-    transition: 'all 0.4s cubic-bezier(0.34,1.56,0.64,1)',
-    bgcolor:   active ? BUBBLE_ACTIVE_BG : 'transparent',
-    boxShadow: active ? '0 2px 8px rgba(217,119,6,0.18)' : 'none',
-    '& .MuiSvgIcon-root': {
-      transition: 'color 0.25s ease',
-      color: active ? BUBBLE_ACTIVE_ICON : colors.primaryMuted,
-    },
-  });
+  const handleLogout = () => {
+    if (logout) logout();
+    navigate('/login');
+  };
 
   return (
     <Box
       sx={{
         width: SIDEBAR_WIDTH,
         height: '100vh',
-        bgcolor: colors.surface,
-        borderRight: `1px solid ${colors.border}`,
+        bgcolor: isDark ? colors.surface : '#FFFFFF',
+        borderRight: isDark ? `1px solid ${colors.border}` : '1px solid #F1F5F9',
         display: 'flex',
         flexDirection: 'column',
         position: 'fixed',
-        top: 0, left: 0,
+        top: 0,
+        left: 0,
         zIndex: 100,
-        boxShadow: '2px 0 8px rgba(0,0,0,0.04)',
+        boxShadow: isDark ? '2px 0 12px rgba(0,0,0,0.4)' : '2px 0 16px rgba(0,0,0,0.02)',
       }}
     >
-      {/* ── Header — same amber "W" logo as AdminSidebar ── */}
+      {/* ── Brand Header with Application Logo ────────────────────── */}
       <Box
         sx={{
           flexShrink: 0,
-          px: 2.5, py: 2,
-          display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between',
-          minHeight: 64,
-          borderBottom: `1px solid ${colors.border}`,
+          px: 2.75,
+          py: 2.25,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1.5,
+          minHeight: 70,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <img src={logo} alt="Weblearn" style={{ height:55, objectFit: 'contain' }} />
-          <Box>
-            <Typography sx={{ fontWeight: 700, fontSize: '15px', color: colors.primary, lineHeight: 1.1, letterSpacing: '-0.2px' }}>
-              Weblearn
-            </Typography>
-            <Typography sx={{ fontSize: '10px', fontWeight: 500, color: colors.textMuted, letterSpacing: '0.3px' }}>
-              Webinar Portal
-            </Typography>
-          </Box>
+        <Box
+          component="img"
+          src={logo}
+          alt="Weblearn"
+          sx={{
+            width: 36,
+            height: 36,
+            objectFit: 'contain',
+            filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.1))',
+            flexShrink: 0,
+          }}
+        />
+        <Box>
+          <Typography
+            sx={{
+              fontWeight: 850,
+              fontSize: '16.5px',
+              color: isDark ? colors.textPrimary : '#0F172A',
+              lineHeight: 1.15,
+              letterSpacing: '-0.3px',
+            }}
+          >
+            Weblearn
+          </Typography>
+          <Typography
+            sx={{
+              fontSize: '11px',
+              fontWeight: 650,
+              color: isDark ? colors.textSecondary : '#64748B',
+              lineHeight: 1.1,
+              letterSpacing: '0.2px',
+            }}
+          >
+            Webinar Portal
+          </Typography>
         </Box>
       </Box>
 
-      {/* ── Nav items — scrollable ── */}
+      {/* ── Navigation Items ────────────────────────────────────── */}
       <List
         sx={{
-          px: 1, py: 1, flexGrow: 1,
-          overflowY: 'auto', overflowX: 'hidden',
-          '&::-webkit-scrollbar':             { width: 3 },
-          '&::-webkit-scrollbar-track':       { background: 'transparent' },
-          '&::-webkit-scrollbar-thumb':       { background: colors.border, borderRadius: 4 },
-          '&::-webkit-scrollbar-thumb:hover': { background: colors.borderMid },
+          px: 1.75,
+          py: 1,
+          flexGrow: 1,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 0.6,
+          '&::-webkit-scrollbar': { width: 3 },
+          '&::-webkit-scrollbar-track': { background: 'transparent' },
+          '&::-webkit-scrollbar-thumb': { background: colors.border, borderRadius: 4 },
         }}
       >
         {studentTabs.map(({ label, route, icon: Icon }) => {
@@ -131,67 +117,140 @@ export default function StudentSidebar() {
             <ListItemButton
               key={route}
               onClick={() => navigate(route)}
-              sx={rowSx(active)}
+              sx={{
+                borderRadius: '14px',
+                px: 1.75,
+                py: 1,
+                bgcolor: active
+                  ? (isDark ? 'rgba(234, 88, 12, 0.18)' : '#FFEDD5')
+                  : 'transparent',
+                color: active
+                  ? '#EA580C'
+                  : (isDark ? colors.textSecondary : '#475569'),
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  bgcolor: active
+                    ? (isDark ? 'rgba(234, 88, 12, 0.22)' : '#FED7AA')
+                    : (isDark ? 'rgba(255,255,255,0.04)' : '#F8FAFC'),
+                  color: active ? '#EA580C' : (isDark ? '#FFFFFF' : '#0F172A'),
+                  '& .nav-icon': {
+                    color: active ? '#EA580C' : '#0F172A',
+                  },
+                },
+              }}
             >
-              {/* Icon bubble */}
-              <Box className="icon-bubble" sx={bubbleSx(active)}>
-                <Icon sx={{ fontSize: 18 }} />
+              <Box
+                className="nav-icon"
+                sx={{
+                  mr: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: active ? '#EA580C' : (isDark ? colors.textMuted : '#64748B'),
+                  transition: 'color 0.2s ease',
+                }}
+              >
+                <Icon sx={{ fontSize: 20 }} />
               </Box>
 
               <ListItemText
-                primary={label}
-                primaryTypographyProps={{
-                  fontSize: '13.5px',
-                  fontWeight: active ? 700 : 500,
-                  color: 'inherit',
-                  noWrap: true,
-                  sx: { transition: 'transform 0.3s ease' },
-                }}
+                primary={
+                  <Typography sx={{ fontSize: '13.5px', fontWeight: active ? 750 : 550, color: 'inherit' }} noWrap>
+                    {label}
+                  </Typography>
+                }
               />
             </ListItemButton>
           );
         })}
       </List>
 
-      {/* ── Bottom promo card ── */}
+      {/* ── Bottom Promo Card: Keep Learning! ──────────────────── */}
       <Box
+        onClick={() => navigate('/dashboard/webinars')}
         sx={{
-          flexShrink: 0, m: 2, p: 2, borderRadius: 2,
-          bgcolor: isDark ? colors.surfaceAlt : colors.primary,
-          color: isDark ? colors.textPrimary : colors.textOnDark,
-          border: isDark ? `1px solid ${colors.border}` : 'none',
+          flexShrink: 0,
+          mx: 2,
+          mb: 1.5,
+          p: 2,
+          borderRadius: '18px',
+          background: isDark
+            ? 'linear-gradient(135deg, rgba(234,88,12,0.15) 0%, rgba(20,22,30,0.9) 100%)'
+            : 'linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%)',
+          border: isDark ? '1px solid rgba(234,88,12,0.25)' : '1px solid #FED7AA',
           textAlign: 'center',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          boxShadow: '0 4px 14px rgba(234, 88, 12, 0.06)',
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: '0 8px 20px rgba(234, 88, 12, 0.12)',
+            borderColor: '#FB923C',
+          },
         }}
       >
-        <Typography sx={{ fontSize: '12px', fontWeight: 700, mb: 0.5, color: isDark ? colors.textPrimary : colors.textOnDark }}>
-          Keep Learning,
-        </Typography>
-        <Typography sx={{ fontSize: '12px', fontWeight: 700, mb: 1.5, color: colors.accent }}>
-          Keep Growing!
-        </Typography>
-        <Typography sx={{ fontSize: '11px', opacity: 0.8, mb: 1.5, lineHeight: 1.4, color: isDark ? colors.textSecondary : colors.textOnDark }}>
-          Join live sessions, gain knowledge and earn certificates.
-        </Typography>
         <Box
-          onClick={() => navigate('/dashboard/upcoming')}
           sx={{
-            bgcolor: colors.accent,
-            color:   colors.textOnAccent,
-            fontSize: '11px', fontWeight: 700,
-            py: 0.75, borderRadius: 1.5, cursor: 'pointer',
-            '&:hover': { bgcolor: colors.accentDark },
-            transition: 'background 0.15s',
+            width: 36,
+            height: 36,
+            borderRadius: '10px',
+            bgcolor: '#EA580C',
+            color: '#FFFFFF',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            mx: 'auto',
+            mb: 1,
+            boxShadow: '0 4px 10px rgba(234,88,12,0.25)',
           }}
         >
-          Explore Webinars
+          <SchoolIcon sx={{ fontSize: 22 }} />
         </Box>
+        <Typography
+          sx={{
+            fontSize: '13px',
+            fontWeight: 800,
+            color: isDark ? colors.textPrimary : '#0F172A',
+            mb: 0.25,
+          }}
+        >
+          Keep Learning!
+        </Typography>
+        <Typography
+          sx={{
+            fontSize: '11px',
+            color: isDark ? colors.textSecondary : '#64748B',
+            lineHeight: 1.35,
+          }}
+        >
+          Attend webinars and earn certificates.
+        </Typography>
       </Box>
 
-      {/* ── Footer tagline ── */}
-      <Box sx={{ flexShrink: 0, px: 2.5, py: 1.5, borderTop: `1px solid ${colors.border}` }}>
-        <Typography sx={{ fontSize: '11px', fontWeight: 600, color: colors.accent, textAlign: 'center' }}>
-          CONNECT · LEARN · GROW
-        </Typography>
+      {/* ── Logout Button ──────────────────────────────────────── */}
+      <Box sx={{ flexShrink: 0, px: 2, pb: 2 }}>
+        <Button
+          fullWidth
+          variant="outlined"
+          startIcon={<LogoutIcon sx={{ fontSize: 17 }} />}
+          onClick={handleLogout}
+          sx={{
+            borderRadius: '14px',
+            borderColor: isDark ? colors.border : '#E2E8F0',
+            color: isDark ? colors.textSecondary : '#334155',
+            fontSize: '13px',
+            fontWeight: 650,
+            textTransform: 'none',
+            py: 0.9,
+            '&:hover': {
+              borderColor: '#EA580C',
+              color: '#EA580C',
+              bgcolor: isDark ? 'rgba(234,88,12,0.08)' : '#FFF7ED',
+            },
+          }}
+        >
+          Logout
+        </Button>
       </Box>
     </Box>
   );

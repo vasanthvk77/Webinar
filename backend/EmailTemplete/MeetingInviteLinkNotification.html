@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Webinar Join Link</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f4f6f9;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #333333;
+            -webkit-text-size-adjust: 100%;
+        }
+        .container {
+            max-width: 600px;
+            margin: 30px auto;
+            background: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.07);
+        }
+        .header {
+            background: linear-gradient(135deg, #eab308 0%, #ca8a04 100%);
+            padding: 36px 30px;
+            text-align: center;
+            color: #ffffff;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #ffffff;
+        }
+        .header p {
+            margin: 8px 0 0;
+            font-size: 15px;
+            color: #fef08a;
+            font-weight: 500;
+        }
+        .content {
+            padding: 32px 30px;
+        }
+        .greeting {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 12px;
+        }
+        .intro-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #4b5563;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .webinar-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #111827;
+            margin: 0 0 12px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            background: #e0e7ff;
+            color: #4338ca;
+            margin-bottom: 16px;
+        }
+        .badge-live {
+            background: #dcfce7;
+            color: #15803d;
+        }
+        .details-grid {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .details-grid td {
+            padding: 9px 0;
+            font-size: 14px;
+            color: #4b5563;
+            border-bottom: 1px dashed #e5e7eb;
+        }
+        .details-grid tr:last-child td {
+            border-bottom: none;
+        }
+        .details-grid td strong {
+            color: #1f2937;
+            display: inline-block;
+            width: 125px;
+        }
+        .time-highlight {
+            color: #b45309;
+            font-weight: 700;
+            background-color: #fef3c7;
+            padding: 3px 8px;
+            border-radius: 6px;
+            display: inline-block;
+        }
+        .btn-wrapper {
+            text-align: center;
+            margin: 28px 0 20px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 15px 38px;
+            font-size: 16px;
+            font-weight: 700;
+            border-radius: 8px;
+            display: inline-block;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+            letter-spacing: 0.3px;
+        }
+        .btn:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        }
+        .notice-box {
+            background-color: #fffbeb;
+            border-left: 4px solid #f59e0b;
+            padding: 12px 16px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #92400e;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .fallback-text {
+            font-size: 12.5px;
+            color: #6b7280;
+            text-align: center;
+            line-height: 1.5;
+            margin-top: 15px;
+            word-break: break-all;
+        }
+        .fallback-text a {
+            color: #2563eb;
+            text-decoration: underline;
+        }
+        .footer {
+            background: #f3f4f6;
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #9ca3af;
+            border-top: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Session Starting Soon!</h1>
+            <p>Your personal live webinar access link is ready</p>
+        </div>
+        <div class="content">
+            <div class="greeting">Hi {{StudentName}},</div>
+            <p class="intro-text">
+                The virtual meeting room for your registered webinar has been created. Please use your personal join link below to enter the live session when it begins.
+            </p>
+
+            <div class="notice-box">
+                ⏰ <strong>Start Time Alert:</strong> Please join 5 minutes early to test your audio and ensure an uninterrupted learning experience.
+            </div>
+
+            <div class="card">
+                <span class="badge">Category: {{Category}}</span>
+                <span class="badge badge-live">● Session Ready</span>
+                <div class="webinar-title">{{WebinarTitle}}</div>
+                <table class="details-grid">
+                    <tr>
+                        <td><strong>Date:</strong> {{Date}}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Meeting Start Time:</strong> <span class="time-highlight">{{StartTime}}</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Duration:</strong> {{Duration}}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Speaker / Conductor:</strong> {{ConductorName}}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="btn-wrapper">
+                <a href="{{JoinMeetingUrl}}" class="btn" target="_blank">👉 Join Live Webinar Now</a>
+            </div>
+
+            <p class="fallback-text">
+                If the button above does not open directly, copy and paste this personal join link into your browser:<br>
+                <a href="{{JoinMeetingUrl}}">{{JoinMeetingUrl}}</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>&copy; 2026 Webinar Management Portal. All rights reserved.</p>
+            <p>You received this email because you are registered for this webinar.</p>
+        </div>
+    </div>
+</body>
+</html>
+

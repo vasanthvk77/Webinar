@@ -13,6 +13,18 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:5270',
         changeOrigin: true
+      },
+      '/Images': {
+        target: 'http://localhost:5270',
+        changeOrigin: true
+      },
+      '/WebinarImages': {
+        target: 'http://localhost:5270',
+        changeOrigin: true
+      },
+      '/StudentProfileImages': {
+        target: 'http://localhost:5270',
+        changeOrigin: true
       }
     }
   }

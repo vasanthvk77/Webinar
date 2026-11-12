@@ -3,19 +3,23 @@ import {
   Box, Typography, Paper, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Chip, Avatar,
   CircularProgress, Tooltip, FormControl, Select, MenuItem,
-  Card, CardContent, Grid
+  Card, CardContent, Grid, Button, IconButton
 } from '@mui/material';
 import GroupsIcon            from '@mui/icons-material/Groups';
 import WorkspacePremiumIcon  from '@mui/icons-material/WorkspacePremium';
 import AccessTimeIcon        from '@mui/icons-material/AccessTime';
 import CheckCircleIcon       from '@mui/icons-material/CheckCircle';
 import VideoCameraFrontIcon  from '@mui/icons-material/VideoCameraFront';
+import FileDownloadIcon      from '@mui/icons-material/FileDownload';
+import RefreshIcon           from '@mui/icons-material/Refresh';
+import MilitaryTechIcon      from '@mui/icons-material/MilitaryTech';
 import toast                 from 'react-hot-toast';
 
 import { webinarService }    from '../../services/api';
-import { useThemeColors }    from '../../context/ThemeContext';
+import { useThemeColors, useAppTheme } from '../../context/ThemeContext';
 import CustomSearchBar       from '../../components/CustomSearchBar';
-import { formatUtcToLocal, formatUtcToLocalDateOnly } from '../../utils/validation';
+import CustomPagination      from '../../components/CustomPagination';
+import { formatUtcToLocalDateOnly, formatUtcToLocalTimeOnly } from '../../utils/validation';
 
 // Helper: Format Duration (seconds -> hours/mins)
 const fmtDuration = (seconds) => {
@@ -29,16 +33,20 @@ const fmtDuration = (seconds) => {
 
 export default function Participants() {
   const colors = useThemeColors();
+  const { isDark } = useAppTheme();
 
-  const [webinars, setWebinars]                    = useState([]);
-  const [selectedWebinarId, setSelectedWebinarId]  = useState('');
-  const [participants, setParticipants]            = useState([]);
-  const [filtered, setFiltered]                    = useState([]);
-  const [loadingWebinars, setLoadingWebinars]      = useState(true);
+  const [webinars, setWebinars]                       = useState([]);
+  const [selectedWebinarId, setSelectedWebinarId]     = useState('-1'); // Default to All Webinars
+  const [participants, setParticipants]               = useState([]);
+  const [filtered, setFiltered]                       = useState([]);
+  const [loadingWebinars, setLoadingWebinars]         = useState(true);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
-  const [search, setSearch]                        = useState('');
+  const [refreshing, setRefreshing]                   = useState(false);
+  const [search, setSearch]                           = useState('');
+  const [page, setPage]                               = useState(1);
+  const [pageSize, setPageSize]                       = useState(10);
 
-  // ── 1. Load Webinars for Dropdown (sorted by latest first) ────────
+  // ── 1. Load Webinars for Dropdown Filter ──────────────────────────
   const loadWebinars = useCallback(async () => {
     setLoadingWebinars(true);
     try {
@@ -46,12 +54,6 @@ export default function Participants() {
       if (res.data?.success) {
         const list = res.data.data || [];
         setWebinars(list);
-
-        // By default, select the latest created webinar
-        if (list.length > 0) {
-          const latestId = String(list[0].id);
-          setSelectedWebinarId(latestId);
-        }
       }
     } catch (err) {
       console.error('Failed to load webinars:', err);
@@ -65,11 +67,14 @@ export default function Participants() {
     loadWebinars();
   }, [loadWebinars]);
 
-  // ── 2. Load Participants from wms.WebinarCompleted ────────────────
-  const loadParticipants = useCallback(async (webinarId) => {
-    setLoadingParticipants(true);
+  // ── 2. Load Participants via wms.GetParticipants ─────────────────
+  const loadParticipants = useCallback(async (webinarId, isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoadingParticipants(true);
+
     try {
-      const res = await webinarService.getParticipants(webinarId);
+      const wid = (webinarId === '-1' || !webinarId) ? null : Number(webinarId);
+      const res = await webinarService.getParticipants(wid);
       if (res.data?.success) {
         const data = res.data.data || [];
         setParticipants(data);
@@ -80,14 +85,13 @@ export default function Participants() {
       toast.error('Failed to load participants');
     } finally {
       setLoadingParticipants(false);
+      setRefreshing(false);
     }
   }, []);
 
   // When selectedWebinarId changes, fetch participants
   useEffect(() => {
-    if (selectedWebinarId) {
-      loadParticipants(selectedWebinarId === '-1' ? -1 : Number(selectedWebinarId));
-    }
+    loadParticipants(selectedWebinarId);
   }, [selectedWebinarId, loadParticipants]);
 
   // ── 3. Filter by search query ─────────────────────────────────────
@@ -101,28 +105,84 @@ export default function Participants() {
       participants.filter(p =>
         (p.fullName && p.fullName.toLowerCase().includes(q)) ||
         (p.email && p.email.toLowerCase().includes(q)) ||
-        (p.customUserId && p.customUserId.toLowerCase().includes(q)) ||
-        (p.certificateCode && p.certificateCode.toLowerCase().includes(q)) ||
+        (p.fullPhoneNumber && p.fullPhoneNumber.toLowerCase().includes(q)) ||
         (p.mobileNumber && p.mobileNumber.toLowerCase().includes(q)) ||
-        (p.webinarName && p.webinarName.toLowerCase().includes(q))
+        String(p.userId).includes(q)
       )
     );
+    setPage(1);
   }, [search, participants]);
+
+  // Reset page when webinar filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [selectedWebinarId]);
+
+  // ── Paginated Participants ─────────────────────────────────────────
+  const paginatedParticipants = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize]);
 
   // ── 4. Stats Summary ──────────────────────────────────────────────
   const stats = useMemo(() => {
-    const total = filtered.length;
-    const attended = filtered.filter(p => p.isAttended).length;
-    const certified = filtered.filter(p => p.isCertificateEligible).length;
-    const totalSeconds = filtered.reduce((acc, p) => acc + (p.attendedDuration || 0), 0);
-    const avgSeconds = total > 0 ? Math.round(totalSeconds / total) : 0;
+    const totalUsers = filtered.length;
+    const totalCompletions = filtered.reduce((acc, p) => acc + (p.completedCount || 0), 0);
+    const totalCertificates = filtered.reduce((acc, p) => acc + (p.certificatesEarned || 0), 0);
+    const totalSeconds = filtered.reduce((acc, p) => acc + (p.totalAttendedDuration || 0), 0);
+    const avgSeconds = totalUsers > 0 ? Math.round(totalSeconds / totalUsers) : 0;
+
     return {
-      total,
-      attended,
-      certified,
+      totalUsers,
+      totalCompletions,
+      totalCertificates,
       avgTime: fmtDuration(avgSeconds)
     };
   }, [filtered]);
+
+  // ── 5. Export CSV ─────────────────────────────────────────────────
+  const handleExportCSV = () => {
+    if (filtered.length === 0) {
+      toast.error('No participant records to export');
+      return;
+    }
+
+    const headers = [
+      'Rank',
+      'User ID',
+      'Participant Name',
+      'Email',
+      'Phone Number',
+      'Completed Webinars Count',
+      'Total Attended Duration',
+      'Certificates Earned',
+      'Last Completed Date'
+    ];
+
+    const rows = filtered.map((p, idx) => [
+      idx + 1,
+      p.userId,
+      `"${(p.fullName || '').replace(/"/g, '""')}"`,
+      `"${(p.email || '').replace(/"/g, '""')}"`,
+      `"${(p.fullPhoneNumber || '').replace(/"/g, '""')}"`,
+      p.completedCount || 0,
+      `"${fmtDuration(p.totalAttendedDuration)}"`,
+      p.certificatesEarned || 0,
+      p.lastCompletedAt ? formatUtcToLocalDateOnly(p.lastCompletedAt) : '—'
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Webinar_Participants_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success('Participants report exported successfully');
+  };
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1600, mx: 'auto', width: '100%' }}>
@@ -130,110 +190,167 @@ export default function Participants() {
       {/* ── Page Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box
+          <Avatar
             sx={{
-              width: 44,
-              height: 44,
+              width: 48,
+              height: 48,
               borderRadius: 2.5,
-              bgcolor: colors.accentMuted,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
+              bgcolor: 'rgba(217, 119, 6, 0.14)',
+              color: '#D97706',
+              boxShadow: '0 4px 12px rgba(217, 119, 6, 0.16)'
             }}
           >
-            <GroupsIcon sx={{ fontSize: 24, color: colors.accent }} />
-          </Box>
+            <GroupsIcon sx={{ fontSize: 26 }} />
+          </Avatar>
           <Box>
-            <Typography variant="h5" sx={{ fontWeight: 800, color: colors.primary, letterSpacing: '-0.3px' }}>
+            <Typography variant="h5" sx={{ fontWeight: 800, color: colors.textPrimary, letterSpacing: '-0.3px' }}>
               Webinar Participants
             </Typography>
             <Typography variant="body2" sx={{ color: colors.textMuted, fontSize: '13px' }}>
-              Track student session attendance, durations, and certificate status from completed webinars
+              Student session attendance rankings and completed webinar counts (descending order)
             </Typography>
           </Box>
         </Box>
 
-        {/* ── Webinar Dropdown Selector ── */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: { xs: '100%', sm: 320 } }}>
-          <Typography sx={{ fontSize: '13px', fontWeight: 700, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
-            Select Webinar:
-          </Typography>
-          <FormControl size="small" fullWidth sx={{ minWidth: 240 }}>
-            <Select
-              value={selectedWebinarId}
-              onChange={(e) => setSelectedWebinarId(e.target.value)}
-              disabled={loadingWebinars || webinars.length === 0}
-              displayEmpty
+        {/* Top Controls: Dropdown + Refresh + Export */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography sx={{ fontSize: '13px', fontWeight: 700, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+              Filter Webinar:
+            </Typography>
+            <FormControl size="small" sx={{ minWidth: 260 }}>
+              <Select
+                value={selectedWebinarId}
+                onChange={(e) => setSelectedWebinarId(e.target.value)}
+                disabled={loadingWebinars}
+                displayEmpty
+                sx={{
+                  borderRadius: 2,
+                  bgcolor: colors.surface,
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                  border: `1px solid ${colors.border}`,
+                  '& .MuiOutlinedInput-notchedOutline': { border: 'none' }
+                }}
+              >
+                <MenuItem value="-1" sx={{ fontWeight: 750, color: '#D97706' }}>
+                  ⚡ All Webinars (Combined Rankings)
+                </MenuItem>
+                {webinars.map((w, idx) => (
+                  <MenuItem key={w.id} value={String(w.id)}>
+                    {w.webinarName} {idx === 0 ? ' (Latest)' : ''}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+
+          <Tooltip title="Refresh participants">
+            <IconButton
+              onClick={() => loadParticipants(selectedWebinarId, true)}
+              disabled={refreshing || loadingParticipants}
               sx={{
-                borderRadius: 2,
                 bgcolor: colors.surface,
-                fontSize: '13.5px',
-                fontWeight: 600,
                 border: `1px solid ${colors.border}`,
-                '& .MuiOutlinedInput-notchedOutline': { border: 'none' }
+                color: colors.textSecondary,
+                '&:hover': { bgcolor: colors.surfaceHover }
               }}
             >
-              {loadingWebinars ? (
-                <MenuItem disabled value="">
-                  Loading webinars...
-                </MenuItem>
-              ) : webinars.length === 0 ? (
-                <MenuItem disabled value="">
-                  No webinars available
-                </MenuItem>
-              ) : (
-                [
-                  <MenuItem key="-1" value="-1" sx={{ fontWeight: 700, color: colors.accent }}>
-                    ⚡ All Webinars (Combined)
-                  </MenuItem>,
-                  ...webinars.map((w, idx) => (
-                    <MenuItem key={w.id} value={String(w.id)}>
-                      {w.webinarName} {idx === 0 ? ' (Latest)' : ''}
-                    </MenuItem>
-                  ))
-                ]
-              )}
-            </Select>
-          </FormControl>
+              <RefreshIcon sx={{
+                fontSize: 20,
+                animation: refreshing ? 'spin 1s linear infinite' : 'none',
+                '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } }
+              }} />
+            </IconButton>
+          </Tooltip>
+
+          <Button
+            variant="outlined"
+            startIcon={<FileDownloadIcon />}
+            onClick={handleExportCSV}
+            disabled={loadingParticipants || filtered.length === 0}
+            sx={{
+              borderRadius: 2,
+              textTransform: 'none',
+              fontWeight: 700,
+              fontSize: '13px',
+              px: 2,
+              py: 0.9,
+              borderColor: colors.border,
+              color: colors.textPrimary,
+              bgcolor: colors.surface,
+              '&:hover': { bgcolor: colors.surfaceHover, borderColor: '#D97706' }
+            }}
+          >
+            Export CSV
+          </Button>
         </Box>
       </Box>
 
       {/* ── Summary Stats Cards ── */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
+        {/* Total Unique Students */}
         <Grid item xs={12} sm={6} md={3}>
           <Card elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 2.5, bgcolor: colors.surface }}>
             <CardContent sx={{ p: 2.2, '&:last-child': { pb: 2.2 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography variant="caption" sx={{ color: colors.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Total Completed
+                    Completed Students
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, color: colors.primary, mt: 0.5 }}>
-                    {stats.total}
+                    {stats.totalUsers}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11.5px', mt: 0.3, display: 'block' }}>
+                    Unique participants
                   </Typography>
                 </Box>
                 <Avatar sx={{ bgcolor: 'rgba(56, 189, 248, 0.12)', color: '#0284C7', width: 44, height: 44 }}>
-                  <VideoCameraFrontIcon sx={{ fontSize: 22 }} />
+                  <GroupsIcon sx={{ fontSize: 22 }} />
                 </Avatar>
               </Box>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
-         
-        </Grid>
-
+        {/* Total Completed Sessions */}
         <Grid item xs={12} sm={6} md={3}>
           <Card elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 2.5, bgcolor: colors.surface }}>
             <CardContent sx={{ p: 2.2, '&:last-child': { pb: 2.2 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography variant="caption" sx={{ color: colors.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Certificates Ready
+                    Total Completions
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 800, color: '#10B981', mt: 0.5 }}>
+                    {stats.totalCompletions}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11.5px', mt: 0.3, display: 'block' }}>
+                    Across completed sessions
+                  </Typography>
+                </Box>
+                <Avatar sx={{ bgcolor: 'rgba(16, 185, 129, 0.12)', color: '#10B981', width: 44, height: 44 }}>
+                  <CheckCircleIcon sx={{ fontSize: 22 }} />
+                </Avatar>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Certificates Earned */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 2.5, bgcolor: colors.surface }}>
+            <CardContent sx={{ p: 2.2, '&:last-child': { pb: 2.2 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="caption" sx={{ color: colors.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Certificates Earned
                   </Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800, color: '#D97706', mt: 0.5 }}>
-                    {stats.certified}
+                    {stats.totalCertificates}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11.5px', mt: 0.3, display: 'block' }}>
+                    Eligible for certificate download
                   </Typography>
                 </Box>
                 <Avatar sx={{ bgcolor: 'rgba(245, 158, 11, 0.14)', color: '#D97706', width: 44, height: 44 }}>
@@ -244,19 +361,23 @@ export default function Participants() {
           </Card>
         </Grid>
 
+        {/* Average Attended Time */}
         <Grid item xs={12} sm={6} md={3}>
           <Card elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 2.5, bgcolor: colors.surface }}>
             <CardContent sx={{ p: 2.2, '&:last-child': { pb: 2.2 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography variant="caption" sx={{ color: colors.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    Average Attended Time
+                    Avg. Attended Time
                   </Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 800, color: colors.primary, mt: 0.5 }}>
+                  <Typography variant="h5" sx={{ fontWeight: 800, color: '#8B5CF6', mt: 0.5 }}>
                     {stats.avgTime}
                   </Typography>
+                  <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11.5px', mt: 0.3, display: 'block' }}>
+                    Per registered student
+                  </Typography>
                 </Box>
-                <Avatar sx={{ bgcolor: 'rgba(99, 102, 241, 0.12)', color: '#4F46E5', width: 44, height: 44 }}>
+                <Avatar sx={{ bgcolor: 'rgba(139, 92, 246, 0.12)', color: '#8B5CF6', width: 44, height: 44 }}>
                   <AccessTimeIcon sx={{ fontSize: 22 }} />
                 </Avatar>
               </Box>
@@ -269,16 +390,16 @@ export default function Participants() {
       <CustomSearchBar
         value={search}
         onChange={setSearch}
-        placeholder="Search participant by name, email, User ID, certificate code..."
+        placeholder="Search participant by name, email, or phone number..."
         sx={{ mb: 2.5 }}
       />
 
       {/* ── Participants Table ── */}
-      <Paper elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 2.5, overflow: 'hidden' }}>
+      <Paper elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 2.5, overflow: 'hidden', bgcolor: colors.surface }}>
         {loadingParticipants ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 8, gap: 1.5 }}>
-            <CircularProgress size={36} sx={{ color: colors.accent }} />
-            <Typography sx={{ color: colors.textMuted, fontSize: '13.5px' }}>
+            <CircularProgress size={36} sx={{ color: '#D97706' }} />
+            <Typography sx={{ color: colors.textMuted, fontSize: '13.5px', fontWeight: 600 }}>
               Loading participants from WebinarCompleted...
             </Typography>
           </Box>
@@ -287,27 +408,29 @@ export default function Participants() {
             <Typography sx={{ color: colors.textMuted, fontSize: '14px', fontWeight: 600 }}>
               {search
                 ? 'No participants match your search criteria.'
-                : 'No completion records found for this webinar yet.'}
+                : 'No completion records found yet.'}
             </Typography>
             <Typography sx={{ color: colors.textSecondary, fontSize: '12.5px', mt: 0.5 }}>
-              Participants appear here automatically when the session finishes or attendance is recorded.
+              Participants appear here automatically when sessions complete and attendance is recorded.
             </Typography>
           </Box>
         ) : (
-          <TableContainer>
+          <>
+            <TableContainer>
             <Table>
               <TableHead>
-                <TableRow sx={{ bgcolor: colors.surfaceAlt }}>
-                  {['#', 'Participant', 'Email & Phone', 'Webinar', 'Meeting User ID', 'Attended Duration', 'Certificate Code', 'Completed At'].map((h) => (
+                <TableRow sx={{ bgcolor: isDark ? 'rgba(255,255,255,0.03)' : '#F8FAFC' }}>
+                  {['RANK', 'PARTICIPANT NAME', 'EMAIL & PHONE', 'COMPLETED COUNT', 'TOTAL ATTENDED TIME', 'CERTIFICATES', 'LAST COMPLETED'].map((h, i) => (
                     <TableCell
                       key={h}
+                      align={h === 'RANK' || h === 'COMPLETED COUNT' ? 'center' : 'left'}
                       sx={{
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        color: colors.textMuted,
+                        fontSize: '11.5px',
+                        fontWeight: 800,
+                        color: colors.textSecondary,
                         textTransform: 'uppercase',
                         letterSpacing: '0.5px',
-                        py: 1.5
+                        py: 1.8
                       }}
                     >
                       {h}
@@ -317,132 +440,140 @@ export default function Participants() {
               </TableHead>
 
               <TableBody>
-                {filtered.map((p, idx) => {
+                {paginatedParticipants.map((p, idx) => {
                   const initial = (p.fullName || p.firstName || 'S').charAt(0).toUpperCase();
+                  const rankNumber = (page - 1) * pageSize + idx + 1;
+                  const isTopRank = rankNumber <= 3;
 
                   return (
                     <TableRow
-                      key={p.completionId || p.webinarRegisterId || idx}
+                      key={p.userId || idx}
+                      hover
                       sx={{
-                        '&:hover': { bgcolor: 'rgba(0,0,0,0.015)' },
+                        transition: 'background-color 0.15s ease',
+                        '&:hover': { bgcolor: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(217, 119, 6, 0.03)' },
                         '&:last-child td': { borderBottom: 'none' }
                       }}
                     >
-                      {/* # Index */}
-                      <TableCell sx={{ fontSize: '13px', color: colors.textMuted, fontWeight: 600 }}>
-                        {idx + 1}
+                      {/* Rank Index */}
+                      <TableCell align="center" sx={{ py: 2 }}>
+                        {isTopRank ? (
+                          <Chip
+                            label={`#${rankNumber}`}
+                            size="small"
+                            sx={{
+                              fontWeight: 800,
+                              fontSize: '12px',
+                              bgcolor: rankNumber === 1 ? '#FEF3C7' : rankNumber === 2 ? '#E2E8F0' : '#FFEDD5',
+                              color: rankNumber === 1 ? '#B45309' : rankNumber === 2 ? '#475569' : '#C2410C',
+                              border: `1px solid ${rankNumber === 1 ? '#FDE68A' : rankNumber === 2 ? '#CBD5E1' : '#FED7AA'}`
+                            }}
+                          />
+                        ) : (
+                          <Typography sx={{ fontSize: '13px', color: colors.textMuted, fontWeight: 700 }}>
+                            #{rankNumber}
+                          </Typography>
+                        )}
                       </TableCell>
 
                       {/* Participant Profile */}
-                      <TableCell>
+                      <TableCell sx={{ py: 2 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                           <Avatar
                             sx={{
-                              width: 36,
-                              height: 36,
-                              bgcolor: colors.accentMuted,
-                              color: colors.accent,
-                              fontWeight: 700,
-                              fontSize: '14px'
+                              width: 40,
+                              height: 40,
+                              bgcolor: isTopRank ? 'rgba(217, 119, 6, 0.15)' : colors.surfaceHover,
+                              color: isTopRank ? '#D97706' : colors.textSecondary,
+                              fontWeight: 800,
+                              fontSize: '14.5px',
+                              border: `1px solid ${colors.border}`
                             }}
                           >
                             {initial}
                           </Avatar>
-                          <Box>
-                            <Typography sx={{ fontSize: '13.5px', fontWeight: 700, color: colors.primary, lineHeight: 1.2 }}>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography sx={{ fontWeight: 750, fontSize: '14px', color: colors.textPrimary, lineHeight: 1.3 }}>
                               {p.fullName || 'Student'}
                             </Typography>
-                          
+                            <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11.5px', display: 'block', mt: 0.2 }}>
+                              User ID: #{p.userId}
+                            </Typography>
                           </Box>
                         </Box>
                       </TableCell>
 
-                      {/* Contact Info */}
-                      <TableCell>
-                        <Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>
+                      {/* Contact: Email & Phone */}
+                      <TableCell sx={{ py: 2 }}>
+                        <Typography sx={{ fontSize: '13px', color: colors.textPrimary, fontWeight: 600 }}>
                           {p.email}
                         </Typography>
-                        {p.fullPhoneNumber && (
-                          <Typography sx={{ fontSize: '11px', color: colors.textMuted }}>
-                            {p.fullPhoneNumber}
-                          </Typography>
-                        )}
-                      </TableCell>
-
-                      {/* Webinar Title */}
-                      <TableCell sx={{ maxWidth: 220 }}>
-                        <Typography
-                          noWrap
-                          title={p.webinarName}
-                          sx={{ fontSize: '13px', fontWeight: 600, color: colors.primary }}
-                        >
-                          {p.webinarName}
-                        </Typography>
-                        <Typography sx={{ fontSize: '11px', color: colors.textMuted }}>
-                          {formatUtcToLocalDateOnly(p.webinarDate)}
+                        <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '12px', mt: 0.2, display: 'block' }}>
+                          {p.fullPhoneNumber || p.mobileNumber || '—'}
                         </Typography>
                       </TableCell>
 
-                      {/* Meeting User ID */}
-                      <TableCell>
-                        <Chip
-                          label={p.customUserId || `UserId - ${p.userId}`}
-                          size="small"
-                          sx={{
-                            fontFamily: 'monospace',
-                            fontSize: '11.5px',
-                            fontWeight: 600,
-                            bgcolor: 'rgba(15, 23, 42, 0.06)',
-                            color: colors.primary
-                          }}
-                        />
+                      {/* Completed Count (Ranked descending) */}
+                      <TableCell align="center" sx={{ py: 2 }}>
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                          <Chip
+                            label={`${p.completedCount} Completed`}
+                            size="small"
+                            sx={{
+                              fontWeight: 850,
+                              fontSize: '12.5px',
+                              px: 0.8,
+                              py: 1.6,
+                              bgcolor: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ECFDF5',
+                              color: isDark ? '#34D399' : '#047857',
+                              border: '1px solid rgba(16, 185, 129, 0.3)'
+                            }}
+                          />
+                        </Box>
                       </TableCell>
 
                       {/* Attended Duration */}
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                          <AccessTimeIcon sx={{ fontSize: 16, color: '#D97706' }} />
-                          <Typography sx={{ fontSize: '13px', fontWeight: 700, color: colors.primary }}>
-                            {fmtDuration(p.attendedDuration)}
+                      <TableCell sx={{ py: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6 }}>
+                          <AccessTimeIcon sx={{ fontSize: 15, color: colors.textMuted }} />
+                          <Typography sx={{ fontSize: '13px', fontWeight: 650, color: colors.textPrimary }}>
+                            {fmtDuration(p.totalAttendedDuration)}
                           </Typography>
                         </Box>
-                        
                       </TableCell>
 
-                      {/* Certificate Status & Code */}
-                      <TableCell>
-                        {p.isCertificateEligible ? (
-                          <Box>
-                            <Chip
-                              icon={<WorkspacePremiumIcon sx={{ fontSize: '15px !important', color: '#15803D' }} />}
-                              label="Eligible"
-                              size="small"
-                              sx={{
-                                fontSize: '11px',
-                                fontWeight: 700,
-                                bgcolor: 'rgba(34, 197, 94, 0.12)',
-                                color: '#15803D',
-                                mb: 0.5
-                              }}
-                            />
-                            {p.certificateCode && (
-                              <Typography sx={{ fontSize: '10.5px', fontFamily: 'monospace', color: colors.textMuted, display: 'block' }}>
-                                {p.certificateCode}
-                              </Typography>
-                            )}
-                          </Box>
-                        ) : (
+                      {/* Certificates Earned */}
+                      <TableCell sx={{ py: 2 }}>
+                        {p.certificatesEarned > 0 ? (
                           <Chip
-                            label="Ineligible"
+                            icon={<WorkspacePremiumIcon sx={{ fontSize: '15px !important', color: '#D97706 !important' }} />}
+                            label={`${p.certificatesEarned} Ready`}
                             size="small"
-                            sx={{ fontSize: '11px', fontWeight: 600, bgcolor: colors.surfaceAlt, color: colors.textMuted }}
+                            sx={{
+                              bgcolor: isDark ? 'rgba(217, 119, 6, 0.12)' : '#FEF3C7',
+                              color: '#D97706',
+                              fontWeight: 750,
+                              fontSize: '12px',
+                              border: '1px solid rgba(217, 119, 6, 0.25)'
+                            }}
                           />
+                        ) : (
+                          <Typography sx={{ fontSize: '12.5px', color: colors.textMuted }}>
+                            None
+                          </Typography>
                         )}
                       </TableCell>
 
-                      {/* Completed At Timestamp */}
-                      <TableCell sx={{ fontSize: '12px', color: colors.textSecondary }}>
-                        {formatUtcToLocal(p.completedAt)}
+                      {/* Last Completed Date */}
+                      <TableCell sx={{ py: 2 }}>
+                        <Typography sx={{ fontSize: '12.5px', color: colors.textPrimary, fontWeight: 600 }}>
+                          {p.lastCompletedAt ? formatUtcToLocalDateOnly(p.lastCompletedAt) : '—'}
+                        </Typography>
+                        {p.lastCompletedAt && (
+                          <Typography variant="caption" sx={{ fontSize: '11px', color: colors.textMuted }}>
+                            {formatUtcToLocalTimeOnly(p.lastCompletedAt)}
+                          </Typography>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -450,9 +581,19 @@ export default function Participants() {
               </TableBody>
             </Table>
           </TableContainer>
+
+          {/* ── Table Pagination ── */}
+          <CustomPagination
+            totalItems={filtered.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 20, 30, 50, 100]}
+          />
+        </>
         )}
       </Paper>
     </Box>
   );
 }
-

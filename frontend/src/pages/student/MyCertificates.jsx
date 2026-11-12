@@ -452,7 +452,7 @@ export default function MyCertificates() {
               <Button
                 variant="contained"
                 endIcon={<ArrowForwardIcon />}
-                onClick={() => navigate('/dashboard/upcoming')}
+                onClick={() => navigate('/dashboard/webinars?tab=available')}
                 sx={{
                   bgcolor: '#F2B705',
                   color: '#172338',

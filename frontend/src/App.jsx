@@ -23,12 +23,13 @@ import ActivityLogs        from './pages/admin/ActivityLogs';
 import Categories          from './pages/admin/Categories';
 import Webinars            from './pages/admin/Webinars';
 import Participants        from './pages/admin/Participants';
+import Payments            from './pages/admin/Payments';
 import Certifications      from './pages/admin/Certifications';
 import TemplateBuilder    from './pages/admin/TemplateBuilder';
-import UpcomingWebinars    from './pages/student/UpcomingWebinars';
-import RegisteredWebinars  from './pages/student/RegisteredWebinars';
-import CompletedWebinars   from './pages/student/CompletedWebinars';
+import StudentWebinars    from './pages/student/StudentWebinars';
 import MyCertificates      from './pages/student/MyCertificates';
+import StudentDashboard    from './pages/student/StudentDashboard';
+import StudentProfile      from './pages/student/StudentProfile';
 
 // -------------------------------------------------------
 // RoleRedirect
@@ -87,11 +88,12 @@ function AppInner() {
                 </PrivateRoute>
               }
             >
-              <Route index element={<ModulePlaceholder />} />
-              <Route path="profile"       element={<ModulePlaceholder />} />
-              <Route path="upcoming"      element={<UpcomingWebinars />} />
-              <Route path="registered"    element={<RegisteredWebinars />} />
-              <Route path="completed"     element={<CompletedWebinars />} />
+              <Route index element={<StudentDashboard />} />
+              <Route path="profile"       element={<StudentProfile />} />
+              <Route path="webinars"      element={<StudentWebinars />} />
+              <Route path="upcoming"      element={<Navigate to="/dashboard/webinars?tab=available" replace />} />
+              <Route path="registered"    element={<Navigate to="/dashboard/webinars?tab=registered" replace />} />
+              <Route path="completed"     element={<Navigate to="/dashboard/webinars?tab=completed" replace />} />
               <Route path="certificates"  element={<MyCertificates />} />
               <Route path="recordings"    element={<ModulePlaceholder />} />
               <Route path="payments"      element={<ModulePlaceholder />} />
@@ -115,7 +117,7 @@ function AppInner() {
               <Route path="dashboard"     element={<AdminDashboard />} />
               <Route path="webinars"      element={<Webinars />} />
               <Route path="registrations" element={<ModulePlaceholder />} />
-              <Route path="payments"      element={<ModulePlaceholder />} />
+              <Route path="payments"      element={<Payments />} />
               <Route path="participants"  element={<Participants />} />
               <Route path="recordings"    element={<ModulePlaceholder />} />
 

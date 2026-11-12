@@ -118,6 +118,7 @@ public class MeetingScheduleChecker : BackgroundService
             {
                 LogBoth($"[MeetingScheduleChecker] ⚡ Meeting '{meeting.Name}' (MeetingID: {meeting.MeetingID}) is ALREADY created on BBB. Checking attendee links immediately...");
                 await SyncAttendeeLinksAsync(meeting, conn, stoppingToken);
+                await CheckAndQueueMeetingJoinEmailsAsync(meeting, conn, stoppingToken);
                 continue;
             }
 
@@ -140,6 +141,7 @@ public class MeetingScheduleChecker : BackgroundService
                     meeting.IsMeetingCreated = true;
                     // Immediately generate attendee links after BBB create success
                     await SyncAttendeeLinksAsync(meeting, conn, stoppingToken);
+                    await CheckAndQueueMeetingJoinEmailsAsync(meeting, conn, stoppingToken);
                 }
             }
             else if (nowUtc < triggerTimeUtc)
@@ -380,6 +382,56 @@ public class MeetingScheduleChecker : BackgroundService
         catch (Exception ex)
         {
             LogWarnBoth($"[MeetingScheduleChecker] ❌ Exception while synchronizing attendee links for '{meeting.MeetingID}': {ex.Message}");
+        }
+    }
+
+    private async Task CheckAndQueueMeetingJoinEmailsAsync(PendingMeetingScheduleDto meeting, SqlConnection conn, CancellationToken stoppingToken)
+    {
+        try
+        {
+            // Verify condition: IsMeetingCreated == 1 && RegisteredCount == GeneratedLinksCount && RegisteredCount > 0
+            var counts = await conn.QueryFirstOrDefaultAsync<dynamic>(
+                @"SELECT 
+                    (SELECT COUNT(1) FROM wms.WebinarRegistrations WHERE WebinarId = @WebinarId) AS TotalReg,
+                    (SELECT COUNT(1) FROM wms.AttendeeMeetingLinks WHERE MeetingId = @MeetingId) AS TotalLinks",
+                new { WebinarId = meeting.WebinarId, MeetingId = meeting.Id }
+            );
+
+            int totalReg = counts?.TotalReg != null ? (int)counts.TotalReg : 0;
+            int totalLinks = counts?.TotalLinks != null ? (int)counts.TotalLinks : 0;
+
+            LogBoth($"[MeetingScheduleChecker] 📧 Evaluating Email Queue Condition for '{meeting.Name}' (MeetingID: {meeting.MeetingID}):");
+            LogBoth($"[MeetingScheduleChecker]    IsMeetingCreated: {meeting.IsMeetingCreated} | Total Registrations: {totalReg} | Generated Links: {totalLinks}");
+
+            if (totalReg > 0 && totalLinks >= totalReg)
+            {
+                LogBoth($"[MeetingScheduleChecker] 🎯 Condition SATISFIED: Total Registrations ({totalReg}) === Generated Links ({totalLinks})!");
+                LogBoth($"[MeetingScheduleChecker] 📨 Queueing personalized meeting join link emails into wms.EmailQueue...");
+
+                var queueResult = await conn.QueryFirstOrDefaultAsync<dynamic>(
+                    "wms.sp_QueueAttendeeMeetingJoinEmails",
+                    new { MeetingId = meeting.Id, WebinarId = meeting.WebinarId },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                int queuedCount = queueResult?.QueuedCount != null ? (int)queueResult.QueuedCount : 0;
+                if (queuedCount > 0)
+                {
+                    LogBoth($"[MeetingScheduleChecker] 🚀 Successfully queued {queuedCount} meeting join email(s) into wms.EmailQueue for '{meeting.Name}'. Email processor will deliver them.");
+                }
+                else
+                {
+                    LogBoth($"[MeetingScheduleChecker] ℹ️ All {totalReg} registered students already have join link emails queued in wms.EmailQueue. No new emails to queue.");
+                }
+            }
+            else
+            {
+                LogBoth($"[MeetingScheduleChecker] ⏳ Join link email condition NOT met yet ({totalLinks}/{totalReg} links ready). Skipping email queueing.");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogWarnBoth($"[MeetingScheduleChecker] ❌ Exception while queueing meeting join emails for '{meeting.MeetingID}': {ex.Message}");
         }
     }
 }

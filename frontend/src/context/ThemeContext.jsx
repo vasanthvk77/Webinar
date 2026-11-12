@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useMemo, useCallback } from 'react';
-import { lightColors, darkColors, buildMuiTheme } from '../utils/theme';
+import { lightColors, darkColors, buildMuiTheme, BANNER_THEME } from '../utils/theme';
+
+export { BANNER_THEME };
 
 // ================================================================
 // ThemeContext
@@ -77,3 +79,5 @@ export function useAppTheme() {
 export function useThemeColors() {
   return useAppTheme().colors;
 }
+
+export { CHART_PILLARS } from '../utils/theme';

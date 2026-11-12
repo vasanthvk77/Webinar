@@ -18,6 +18,7 @@ namespace WebinarApi.Services
         private readonly string                               _connectionString;
         private readonly string                               _frontendUrl;
         private readonly string                               _templatePath;
+        private readonly string                               _joinLinkTemplatePath;
 
         public EmailQueueBackgroundService(
             IServiceProvider serviceProvider,
@@ -37,7 +38,8 @@ namespace WebinarApi.Services
                               ? frontendArray[0].TrimEnd('/')
                               : "http://localhost:5173";
 
-            _templatePath     = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "StudentWebinrNotification.html");
+            _templatePath         = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "StudentWebinrNotification.html");
+            _joinLinkTemplatePath = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "MeetingInviteLinkNotification.html");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -104,7 +106,17 @@ namespace WebinarApi.Services
             }
             else
             {
-                _logger.LogWarning("[EmailQueueBackgroundService] Email template not found at {Path}, using fallback.", _templatePath);
+                _logger.LogWarning("[EmailQueueBackgroundService] Invite email template not found at {Path}, using fallback.", _templatePath);
+            }
+
+            string joinLinkTemplateContent = "";
+            if (File.Exists(_joinLinkTemplatePath))
+            {
+                joinLinkTemplateContent = await File.ReadAllTextAsync(_joinLinkTemplatePath, stoppingToken);
+            }
+            else
+            {
+                _logger.LogWarning("[EmailQueueBackgroundService] Meeting join link email template not found at {Path}, using fallback.", _joinLinkTemplatePath);
             }
 
             // Read SMTP configuration
@@ -151,9 +163,24 @@ namespace WebinarApi.Services
                     processedWebinarIds.Add(item.WebinarId);
                     bool sent = false;
 
-                    // Build email content
-                    string trackingUrl = $"{_frontendUrl}/webinar-registration?trackingId={item.ShareId}";
-                    string emailBody = FormatEmailTemplate(templateContent, item, trackingUrl);
+                    bool isJoinLinkEmail = string.Equals(item.EmailType, "MEETING_JOIN_LINK", StringComparison.OrdinalIgnoreCase);
+
+                    string emailSubject;
+                    string emailBody;
+
+                    if (isJoinLinkEmail)
+                    {
+                        // Meeting Join Link Notification with explicit start time
+                        emailSubject = $"Live Session Access Link: {item.WebinarName} (Starts at {item.StartTime:hh:mm tt})";
+                        emailBody = FormatJoinLinkEmailTemplate(joinLinkTemplateContent, item);
+                    }
+                    else
+                    {
+                        // Standard Webinar Registration Invite
+                        string trackingUrl = $"{_frontendUrl}/webinar-registration?trackingId={item.ShareId}";
+                        emailSubject = $"Invitation: {item.WebinarName} - Reserve Your Spot!";
+                        emailBody = FormatEmailTemplate(templateContent, item, trackingUrl);
+                    }
 
                     if (isSmtpConfigured && client != null)
                     {
@@ -162,7 +189,7 @@ namespace WebinarApi.Services
                             using var mailMsg = new MailMessage
                             {
                                 From       = new MailAddress(fromEmail, fromName),
-                                Subject    = $"Invitation: {item.WebinarName} - Reserve Your Spot!",
+                                Subject    = emailSubject,
                                 Body       = emailBody,
                                 IsBodyHtml = true
                             };
@@ -170,13 +197,13 @@ namespace WebinarApi.Services
 
                             await client.SendMailAsync(mailMsg, stoppingToken);
                             sent = true;
-                            _logger.LogInformation("[EmailQueueBackgroundService] Email sent to {Email} for Webinar {WebinarId}",
-                                item.RecipientEmail, item.WebinarId);
+                            _logger.LogInformation("[EmailQueueBackgroundService] [{EmailType}] Email sent to {Email} for Webinar {WebinarId}",
+                                item.EmailType, item.RecipientEmail, item.WebinarId);
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogError(ex, "[EmailQueueBackgroundService] Error sending to {Email}: {Message}",
-                                item.RecipientEmail, ex.Message);
+                            _logger.LogError(ex, "[EmailQueueBackgroundService] Error sending [{EmailType}] to {Email}: {Message}",
+                                item.EmailType, item.RecipientEmail, ex.Message);
                         }
                     }
                     else
@@ -214,7 +241,7 @@ namespace WebinarApi.Services
                         string webinarName = status.WebinarName != null ? (string)status.WebinarName : "Webinar";
                         int totalSent = status.TotalCount != null ? (int)status.TotalCount : 0;
 
-                        _logger.LogInformation("[EmailQueueBackgroundService] All {Count} emails for Webinar '{WebinarName}' (ID {WebinarId}) sent successfully!",
+                        _logger.LogInformation("[EmailQueueBackgroundService] All {Count} emails for Webinar '{WebinarName}' (ID {WebinarId}) processed successfully!",
                             totalSent, webinarName, webinarId);
 
                         // Broadcast completion snackbar to Admin UI
@@ -259,6 +286,39 @@ namespace WebinarApi.Services
                 .Replace("{{Duration}}", $"{item.DurationMinutes} min")
                 .Replace("{{ConductorName}}", item.ConductorName)
                 .Replace("{{RegisterUrl}}", trackingUrl);
+        }
+
+        private static string FormatJoinLinkEmailTemplate(string template, EmailQueueItemDto item)
+        {
+            string studentName = $"{item.RecipientFirstName} {item.RecipientLastName}".Trim();
+            if (string.IsNullOrWhiteSpace(studentName)) studentName = "Student";
+
+            string joinUrl = !string.IsNullOrWhiteSpace(item.JoinLink) ? item.JoinLink : "#";
+            string startTimeFormatted = $"{item.StartTime:hh:mm tt} – {item.EndTime:hh:mm tt}";
+
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                return $@"
+                    <h2>Live Session Starting Soon: {item.WebinarName}</h2>
+                    <p>Hi {studentName},</p>
+                    <p><strong>Date:</strong> {item.WebinarDate:dddd, MMM dd, yyyy}</p>
+                    <p><strong>Meeting Start Time:</strong> {startTimeFormatted}</p>
+                    <p><strong>Duration:</strong> {item.DurationMinutes} min</p>
+                    <p><strong>Speaker:</strong> {item.ConductorName}</p>
+                    <p><a href='{joinUrl}'>Join Live Webinar Now</a></p>
+                ";
+            }
+
+            return template
+                .Replace("{{StudentName}}", studentName)
+                .Replace("{{WebinarTitle}}", item.WebinarName)
+                .Replace("{{Category}}", item.CategoryName)
+                .Replace("{{Date}}", item.WebinarDate.ToString("dddd, MMM dd, yyyy"))
+                .Replace("{{StartTime}}", startTimeFormatted)
+                .Replace("{{Duration}}", $"{item.DurationMinutes} min")
+                .Replace("{{ConductorName}}", item.ConductorName)
+                .Replace("{{JoinMeetingUrl}}", joinUrl)
+                .Replace("{{JoinLink}}", joinUrl);
         }
     }
 }

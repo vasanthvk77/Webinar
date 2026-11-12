@@ -53,5 +53,32 @@ public class DashboardController : ControllerBase
             return StatusCode(500, new { success = false, message = "Failed to load dashboard metrics." });
         }
     }
+
+    /// <summary>
+    /// Student Dashboard — Personalized metrics, latest registered webinar,
+    /// attendance duration per webinar, and certificate counts for the logged-in student.
+    /// </summary>
+    [HttpGet("/api/student/dashboard")]
+    public async Task<IActionResult> GetStudentDashboardData()
+    {
+        _logger.LogInformation("[DashboardController] GET /api/student/dashboard — CallerUserId: {UserId}, CallerRoleId: {RoleId}", CallerUserId, CallerRoleId);
+
+        if (CallerUserId <= 0)
+        {
+            _logger.LogWarning("[DashboardController] GetStudentDashboardData UNAUTHORIZED — Invalid CallerUserId");
+            return Unauthorized(new { success = false, message = "User identity not found in token." });
+        }
+
+        try
+        {
+            var data = await _dashboardService.GetStudentDashboardDataAsync(CallerUserId);
+            return Ok(new { success = true, data });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DashboardController] GetStudentDashboardData EXCEPTION for StudentId {StudentId}: {Message}", CallerUserId, ex.Message);
+            return StatusCode(500, new { success = false, message = "Failed to load student dashboard metrics." });
+        }
+    }
 }
 

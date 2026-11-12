@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using WebinarApi.Models;
@@ -14,22 +15,27 @@ namespace WebinarApi.Services
         Task<(bool success, string message, WebinarDto? webinar)>        UpdateAsync(long id, UpdateWebinarRequest request, int updatedBy);
         Task<OperationResultDto>                                         DeleteAsync(long id, int deletedBy);
         Task<(bool success, string message, int count)>                  QueueBulkInvitesAsync(long webinarId);
-        Task<(bool success, string message, string? webinarName)>        RegisterTrackingAsync(string trackingId, int userId);
+        Task<HoldSeatResponseDto>                                        HoldSeatAsync(string trackingId, int userId);
+        Task<(bool success, string message, string? webinarName)>        RegisterTrackingAsync(string trackingId, int userId, string? holdToken = null);
         Task<(bool isFinished, int total, int pending, string? webinarName)> GetEmailQueueStatusAsync(long webinarId);
         Task<CheckEmailResultDto>                                        CheckEmailAsync(string email);
         Task<IEnumerable<CompletedWebinarDto>>                           GetCompletedWebinarsAsync(int userId, long? webinarId = null);
-        Task<IEnumerable<WebinarParticipantDto>>                         GetParticipantsAsync(long? webinarId = null);
+        Task<IEnumerable<ParticipantSummaryDto>>                         GetParticipantsAsync(long? webinarId = null);
+        Task<PaymentsSummaryDto>                                         GetPaymentsAsync();
+        Task<string>                                                     UploadWebinarImageAsync(IFormFile file, string? existingImageUrl = null);
     }
 
     public class WebinarService : IWebinarService
     {
         private readonly string                  _connectionString;
+        private readonly IWebHostEnvironment     _env;
         private readonly ILogger<WebinarService> _logger;
 
-        public WebinarService(IConfiguration config, ILogger<WebinarService> logger)
+        public WebinarService(IConfiguration config, IWebHostEnvironment env, ILogger<WebinarService> logger)
         {
             _connectionString = config.GetConnectionString("DefaultConnection")
                              ?? throw new InvalidOperationException("Connection string not configured.");
+            _env    = env;
             _logger = logger;
         }
 
@@ -121,14 +127,14 @@ namespace WebinarApi.Services
         // -------------------------------------------------------
         // Admin View Participants (Calls: wms.sp_AdminViewParticipants)
         // -------------------------------------------------------
-        public async Task<IEnumerable<WebinarParticipantDto>> GetParticipantsAsync(long? webinarId = null)
+        public async Task<IEnumerable<ParticipantSummaryDto>> GetParticipantsAsync(long? webinarId = null)
         {
             _logger.LogInformation("[Webinar] GetParticipantsAsync called for WebinarId: {WebinarId}", webinarId);
             try
             {
                 using var conn = new SqlConnection(_connectionString);
-                var rows = await conn.QueryAsync<WebinarParticipantDto>(
-                    "wms.sp_AdminViewParticipants",
+                var rows = await conn.QueryAsync<ParticipantSummaryDto>(
+                    "wms.GetParticipants",
                     new { WebinarId = webinarId },
                     commandType: CommandType.StoredProcedure
                 );
@@ -139,7 +145,43 @@ namespace WebinarApi.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Webinar] GetParticipantsAsync EXCEPTION for WebinarId: {WebinarId}: {Message}", webinarId, ex.Message);
-                return Enumerable.Empty<WebinarParticipantDto>();
+                return Enumerable.Empty<ParticipantSummaryDto>();
+            }
+        }
+
+        // -------------------------------------------------------
+        // Get Webinar Payments & Revenue (Calls: wms.GetPayments)
+        // -------------------------------------------------------
+        public async Task<PaymentsSummaryDto> GetPaymentsAsync()
+        {
+            _logger.LogInformation("[Webinar] GetPaymentsAsync called");
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                var rows = await conn.QueryAsync<WebinarPaymentDto>(
+                    "wms.GetPayments",
+                    commandType: CommandType.StoredProcedure
+                );
+                var list = rows.ToList();
+
+                var summary = new PaymentsSummaryDto
+                {
+                    TotalRevenue           = list.Sum(w => w.TotalAmount),
+                    TotalRegistrations     = list.Sum(w => w.RegistrationCount),
+                    TotalPaidRegistrations = list.Where(w => w.IsPaid).Sum(w => w.RegistrationCount),
+                    TotalWebinars          = list.Count,
+                    TotalPaidWebinars      = list.Count(w => w.IsPaid),
+                    TotalFreeWebinars      = list.Count(w => !w.IsPaid),
+                    Webinars               = list
+                };
+
+                _logger.LogInformation("[Webinar] GetPaymentsAsync returned {Count} records, TotalRevenue: {TotalRevenue}", list.Count, summary.TotalRevenue);
+                return summary;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Webinar] GetPaymentsAsync EXCEPTION: {Message}", ex.Message);
+                return new PaymentsSummaryDto();
             }
         }
 
@@ -186,9 +228,12 @@ namespace WebinarApi.Services
                 if (req.IsPaid && (req.Price == null || req.Price <= 0))
                     return (false, "Price must be greater than 0 for paid webinars", null);
 
-                var startTime = DateTime.Parse(req.StartTime);
-                var endTime   = DateTime.Parse(req.EndTime);
-                if (endTime <= startTime)
+                var startOffset = DateTimeOffset.Parse(req.StartTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+                var endOffset   = DateTimeOffset.Parse(req.EndTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+                var startTimeUtc = startOffset.UtcDateTime;
+                var endTimeUtc   = endOffset.UtcDateTime;
+                if (endTimeUtc <= startTimeUtc)
                     return (false, "End time must be after start time", null);
 
                 using var conn = new SqlConnection(_connectionString);
@@ -199,9 +244,9 @@ namespace WebinarApi.Services
                         WebinarName      = req.WebinarName.Trim(),
                         CategoryId       = req.CategoryId,
                         DurationMinutes  = req.DurationMinutes,
-                        WebinarDate      = DateOnly.Parse(req.WebinarDate),
-                        StartTime        = startTime,
-                        EndTime          = endTime,
+                        WebinarDate      = DateOnly.FromDateTime(startTimeUtc),
+                        StartTime        = startTimeUtc,
+                        EndTime          = endTimeUtc,
                         ConductorName    = req.ConductorName.Trim(),
                         ConductorPhone   = req.ConductorPhone?.Trim(),
                         ConductorEmail   = req.ConductorEmail?.Trim(),
@@ -210,7 +255,8 @@ namespace WebinarApi.Services
                         Price            = req.IsPaid ? req.Price : (double?)null,
                         CreatedBy        = createdBy,
                         ShareId          = string.IsNullOrWhiteSpace(req.ShareId) ? null : req.ShareId.Trim(),
-                        CertificateTempId = req.CertificateTempId
+                        CertificateTempId = req.CertificateTempId,
+                        ImageUrl         = string.IsNullOrWhiteSpace(req.ImageUrl) ? null : req.ImageUrl.Trim()
                     },
                     commandType: CommandType.StoredProcedure
                 );
@@ -250,9 +296,12 @@ namespace WebinarApi.Services
                 if (req.IsPaid && (req.Price == null || req.Price <= 0))
                     return (false, "Price must be greater than 0 for paid webinars", null);
 
-                var startTime = DateTime.Parse(req.StartTime);
-                var endTime   = DateTime.Parse(req.EndTime);
-                if (endTime <= startTime)
+                var startOffset = DateTimeOffset.Parse(req.StartTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+                var endOffset   = DateTimeOffset.Parse(req.EndTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+                var startTimeUtc = startOffset.UtcDateTime;
+                var endTimeUtc   = endOffset.UtcDateTime;
+                if (endTimeUtc <= startTimeUtc)
                     return (false, "End time must be after start time", null);
 
                 using var conn = new SqlConnection(_connectionString);
@@ -264,9 +313,9 @@ namespace WebinarApi.Services
                         WebinarName      = req.WebinarName.Trim(),
                         CategoryId       = req.CategoryId,
                         DurationMinutes  = req.DurationMinutes,
-                        WebinarDate      = DateOnly.Parse(req.WebinarDate),
-                        StartTime        = startTime,
-                        EndTime          = endTime,
+                        WebinarDate      = DateOnly.FromDateTime(startTimeUtc),
+                        StartTime        = startTimeUtc,
+                        EndTime          = endTimeUtc,
                         ConductorName    = req.ConductorName.Trim(),
                         ConductorPhone   = req.ConductorPhone?.Trim(),
                         ConductorEmail   = req.ConductorEmail?.Trim(),
@@ -274,7 +323,8 @@ namespace WebinarApi.Services
                         IsPaid           = req.IsPaid,
                         Price            = req.IsPaid ? req.Price : (double?)null,
                         UpdatedBy        = updatedBy,
-                        CertificateTempId = req.CertificateTempId
+                        CertificateTempId = req.CertificateTempId,
+                        ImageUrl         = string.IsNullOrWhiteSpace(req.ImageUrl) ? null : req.ImageUrl.Trim()
                     },
                     commandType: CommandType.StoredProcedure
                 );
@@ -295,6 +345,66 @@ namespace WebinarApi.Services
                 _logger.LogError(ex, "[Webinar] Update EXCEPTION: {Message}", ex.Message);
                 return (false, "An unexpected error occurred", null);
             }
+        }
+
+        // -------------------------------------------------------
+        // Upload webinar thumbnail/cover image to Images/WebinarImages
+        // -------------------------------------------------------
+        public async Task<string> UploadWebinarImageAsync(IFormFile file, string? existingImageUrl = null)
+        {
+            if (file == null || file.Length == 0)
+                throw new ArgumentException("Uploaded file is empty.");
+
+            if (file.Length > 10 * 1024 * 1024)
+                throw new ArgumentException("Webinar image size cannot exceed 10 MB.");
+
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp" };
+            var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(ext))
+                throw new ArgumentException("Only JPG, JPEG, PNG, and WEBP images are allowed.");
+
+            var rootDir = Directory.GetParent(_env.ContentRootPath)?.FullName ?? _env.ContentRootPath;
+            var folderPath = Path.Combine(rootDir, "Images", "WebinarImages");
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+            }
+
+            // If an existing image path is supplied, delete previous file if it exists in the folder
+            if (!string.IsNullOrWhiteSpace(existingImageUrl))
+            {
+                try
+                {
+                    var oldFileName = Path.GetFileName(existingImageUrl.Trim());
+                    if (!string.IsNullOrWhiteSpace(oldFileName))
+                    {
+                        var targetOldPath = Path.Combine(folderPath, oldFileName);
+                        if (File.Exists(targetOldPath))
+                        {
+                            File.Delete(targetOldPath);
+                            _logger.LogInformation("[WebinarService] Deleted previous webinar image: {Path}", targetOldPath);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[WebinarService] Could not delete old webinar image: {Message}", ex.Message);
+                }
+            }
+
+            // Unique 8 characters token (e.g. image_d755afa2.png)
+            var unique8 = Guid.NewGuid().ToString("N")[..8];
+            var newFileName = $"image_{unique8}{ext}";
+            var newFilePath = Path.Combine(folderPath, newFileName);
+
+            using (var stream = new FileStream(newFilePath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+            var relativeUrl = $"/Images/WebinarImages/{newFileName}";
+            _logger.LogInformation("[WebinarService] Saved webinar image at {RelativeUrl}", relativeUrl);
+            return relativeUrl;
         }
 
         // -------------------------------------------------------
@@ -362,14 +472,67 @@ namespace WebinarApi.Services
         }
 
         // -------------------------------------------------------
-        // Register user for webinar via trackingId
+        // Atomically hold seat for 5 mins (BookMyShow pattern)
         // -------------------------------------------------------
-        public async Task<(bool success, string message, string? webinarName)> RegisterTrackingAsync(string trackingId, int userId)
+        public async Task<HoldSeatResponseDto> HoldSeatAsync(string trackingId, int userId)
         {
-            _logger.LogInformation("[Webinar] RegisterTracking called — TrackingId: {TrackingId}, UserId: {UserId}", trackingId, userId);
+            _logger.LogInformation("[Webinar] HoldSeat called — TrackingId: {TrackingId}, UserId: {UserId}", trackingId, userId);
             try
             {
-                // Generate 8 random characters for CustomUserId label (e.g. "UserId - aB3xK9pQ")
+                using var conn = new SqlConnection(_connectionString);
+                var row = await conn.QueryFirstOrDefaultAsync<dynamic>(
+                    "wms.usp_HoldWebinarSeat",
+                    new
+                    {
+                        TrackingId  = trackingId.Trim(),
+                        UserId      = userId,
+                        HoldMinutes = 6 // 6 minutes in DB gives 60s grace buffer over 5-minute UI timer
+                    },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                if (row == null)
+                {
+                    return new HoldSeatResponseDto
+                    {
+                        Success = false,
+                        Message = "Failed to reserve seat. Please try again."
+                    };
+                }
+
+                return new HoldSeatResponseDto
+                {
+                    Success          = (int)row.Success == 1,
+                    Message          = (string)row.Message,
+                    HoldToken        = (string?)row.HoldToken,
+                    ExpiresAt        = (DateTime?)row.ExpiresAt,
+                    RemainingSeconds = (int)row.RemainingSeconds,
+                    WebinarId        = (long)row.WebinarId,
+                    WebinarName      = (string?)row.WebinarName,
+                    RemainingSlots   = (int)row.RemainingSlots,
+                    IsCapacityFull   = (int)row.IsCapacityFull == 1
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Webinar] HoldSeat EXCEPTION: {Message}", ex.Message);
+                return new HoldSeatResponseDto
+                {
+                    Success = false,
+                    Message = "An error occurred while reserving your seat."
+                };
+            }
+        }
+
+        // -------------------------------------------------------
+        // Register user for webinar via trackingId & HoldToken
+        // -------------------------------------------------------
+        public async Task<(bool success, string message, string? webinarName)> RegisterTrackingAsync(string trackingId, int userId, string? holdToken = null)
+        {
+            _logger.LogInformation("[Webinar] RegisterTracking called — TrackingId: {TrackingId}, UserId: {UserId}, HoldToken: {HoldToken}", trackingId, userId, holdToken);
+            try
+            {
+                // Generate 8 random characters for CustomUserId label (e.g. "UserId - 69cdf501")
                 var randomCode = GenerateRandomCode(8);
                 var customUserId = $"UserId - {randomCode}";
 
@@ -378,9 +541,10 @@ namespace WebinarApi.Services
                     "wms.usp_RegisterUserForWebinar",
                     new
                     {
-                        TrackingId = trackingId.Trim(),
-                        UserId = userId,
-                        CustomUserId = customUserId
+                        TrackingId   = trackingId.Trim(),
+                        UserId       = userId,
+                        CustomUserId = customUserId,
+                        HoldToken    = string.IsNullOrWhiteSpace(holdToken) ? null : holdToken.Trim()
                     },
                     commandType: CommandType.StoredProcedure
                 );
@@ -392,7 +556,7 @@ namespace WebinarApi.Services
                 string message = (string)result.Message;
                 string? webinarName = (string?)result.WebinarName;
 
-                _logger.LogInformation("[Webinar] User registered successfully with CustomUserId: {CustomUserId}", customUserId);
+                _logger.LogInformation("[Webinar] User registered result — Success: {Success}, Message: {Message}", success, message);
                 return (success, message, webinarName);
             }
             catch (Exception ex)

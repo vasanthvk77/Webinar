@@ -19,6 +19,7 @@ public class CreateWebinarRequest
     public double?  Price            { get; set; }
     public string?  ShareId          { get; set; }
     public int?     CertificateTempId { get; set; }
+    public string?  ImageUrl         { get; set; }
 }
 
 // -------------------------------------------------------
@@ -39,6 +40,7 @@ public class UpdateWebinarRequest
     public bool     IsPaid           { get; set; }
     public double?  Price            { get; set; }
     public int?     CertificateTempId { get; set; }
+    public string?  ImageUrl         { get; set; }
 }
 
 // -------------------------------------------------------
@@ -64,7 +66,9 @@ public class WebinarDto
     public string    ShareId           { get; set; } = string.Empty;
     public int?      CertificateTempId { get; set; }
     public string?   CertificateTemplateName { get; set; }
+    public string?   ImageUrl          { get; set; }
     public int       RegistrationCount { get; set; }
+    public double    TotalAmount       { get; set; }
     public DateTime  CreatedAt         { get; set; }
     public int?      CreatedBy         { get; set; }
     public string?   CreatedByName     { get; set; }
@@ -78,6 +82,30 @@ public class WebinarDto
     public bool      IsCompleted       { get; set; }
     public string?   ModeratorJoinUrl  { get; set; }
     public string?   MeetingID         { get; set; }
+    public int       RemainingSlots    { get; set; }
+    public bool      IsCapacityFull    { get; set; }
+}
+
+// -------------------------------------------------------
+// Seat Hold Request & Response DTOs
+// -------------------------------------------------------
+public class HoldSeatRequest
+{
+    public string TrackingId { get; set; } = string.Empty; // WebinarId or ShareId
+    public int?   UserId     { get; set; }                 // Optional if provided via Auth claims or check-email
+}
+
+public class HoldSeatResponseDto
+{
+    public bool     Success          { get; set; }
+    public string   Message          { get; set; } = string.Empty;
+    public string?  HoldToken        { get; set; }
+    public DateTime? ExpiresAt        { get; set; }
+    public int      RemainingSeconds { get; set; }
+    public long     WebinarId        { get; set; }
+    public string?  WebinarName      { get; set; }
+    public int      RemainingSlots   { get; set; }
+    public bool     IsCapacityFull   { get; set; }
 }
 
 // -------------------------------------------------------
@@ -87,6 +115,7 @@ public class RegisterTrackingRequest
 {
     public string TrackingId { get; set; } = string.Empty; // WebinarId or ShareId
     public int?   UserId     { get; set; }                 // Optional if provided via Auth claims
+    public string? HoldToken { get; set; }                 // GUID hold token from hold-seat
 }
 
 // -------------------------------------------------------
@@ -115,6 +144,8 @@ public class EmailQueueItemDto
     public long     WebinarId          { get; set; }
     public int      UserId             { get; set; }
     public int      TimeSent           { get; set; }
+    public string   EmailType          { get; set; } = "WEBINAR_INVITE";
+    public string?  JoinLink           { get; set; }
     public string   RecipientEmail     { get; set; } = string.Empty;
     public string   RecipientFirstName { get; set; } = string.Empty;
     public string?  RecipientLastName  { get; set; }
@@ -146,6 +177,8 @@ public class CompletedWebinarDto
     public string    ConductorName          { get; set; } = string.Empty;
     public string?   ConductorEmail         { get; set; }
     public string    ShareId                { get; set; } = string.Empty;
+    public bool      IsPaid                 { get; set; }
+    public double?   Price                  { get; set; }
     public long      WebinarRegisterId      { get; set; }
     public DateTime  RegisteredAt           { get; set; }
     public int       CompletedId            { get; set; }
@@ -160,6 +193,7 @@ public class CompletedWebinarDto
     public int?      CertificateTempId      { get; set; }
     public string?   CertificateTemplateName { get; set; }
     public string?   TemplateImageUrl        { get; set; }
+    public string?   ImageUrl                { get; set; }
 }
 
 // -------------------------------------------------------
@@ -190,5 +224,60 @@ public class WebinarParticipantDto
     public string?   CertificateCode        { get; set; }
     public DateTime  CompletedAt            { get; set; }
     public DateTime  RegisteredAt           { get; set; }
+}
+
+// -------------------------------------------------------
+// DTO: Completed Participants Grouped by User (from wms.GetParticipants)
+// -------------------------------------------------------
+public class ParticipantSummaryDto
+{
+    public int       UserId                 { get; set; }
+    public string    FullName               { get; set; } = string.Empty;
+    public string?   FirstName              { get; set; }
+    public string?   LastName               { get; set; }
+    public string    Email                  { get; set; } = string.Empty;
+    public string?   CountryCode            { get; set; }
+    public string?   MobileNumber           { get; set; }
+    public string?   FullPhoneNumber        { get; set; }
+    public int       CompletedCount         { get; set; }
+    public int       TotalAttendedDuration  { get; set; } // Seconds
+    public int       CertificatesEarned     { get; set; }
+    public DateTime? LastCompletedAt        { get; set; }
+}
+
+// -------------------------------------------------------
+// DTO: Webinar Payments & Revenue (from wms.GetPayments)
+// -------------------------------------------------------
+public class WebinarPaymentDto
+{
+    public long      WebinarId         { get; set; }
+    public string    WebinarName       { get; set; } = string.Empty;
+    public int       CategoryId        { get; set; }
+    public string?   CategoryName      { get; set; }
+    public string?   ConductorName     { get; set; }
+    public DateTime  WebinarDate       { get; set; }
+    public DateTime  StartTime         { get; set; }
+    public DateTime  EndTime           { get; set; }
+    public int       DurationMinutes   { get; set; }
+    public bool      IsPaid            { get; set; }
+    public double    Price             { get; set; }
+    public int       ParticipantLimit  { get; set; }
+    public string?   ShareId           { get; set; }
+    public string?   ImageUrl          { get; set; }
+    public bool      IsCompleted       { get; set; }
+    public DateTime  CreatedAt         { get; set; }
+    public int       RegistrationCount { get; set; }
+    public double    TotalAmount       { get; set; }
+}
+
+public class PaymentsSummaryDto
+{
+    public double                         TotalRevenue           { get; set; }
+    public int                            TotalRegistrations     { get; set; }
+    public int                            TotalPaidRegistrations { get; set; }
+    public int                            TotalWebinars          { get; set; }
+    public int                            TotalPaidWebinars      { get; set; }
+    public int                            TotalFreeWebinars      { get; set; }
+    public IEnumerable<WebinarPaymentDto> Webinars               { get; set; } = new List<WebinarPaymentDto>();
 }
 

@@ -31,6 +31,12 @@ export default function StudentTopbar() {
 
   const fullName = user ? `${user.firstName} ${user.lastName ?? ''}`.trim() : 'User';
 
+  const avatarUrl = user?.profileUrl
+    ? (user.profileUrl.startsWith('http')
+        ? user.profileUrl
+        : `${(import.meta.env.VITE_API_BASE_URL || 'https://localhost:7001').replace(/\/$/, '')}${user.profileUrl.startsWith('/') ? '' : '/'}${user.profileUrl}`)
+    : null;
+
   const iconButtonSx = {
     width: 40,
     height: 40,
@@ -191,6 +197,7 @@ export default function StudentTopbar() {
           }}
         >
           <Avatar
+            src={avatarUrl}
             sx={{
               width: 38,
               height: 38,
@@ -269,6 +276,7 @@ export default function StudentTopbar() {
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 1 }}>
               <Avatar
+                src={avatarUrl}
                 sx={{
                   width: 38,
                   height: 38,

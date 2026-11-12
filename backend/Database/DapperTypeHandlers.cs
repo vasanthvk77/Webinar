@@ -51,4 +51,31 @@ namespace WebinarApi.Database
             parameter.Value = value.ToTimeSpan();
         }
     }
+
+    /// <summary>
+    /// Dapper type handler for DateTime
+    /// Ensures all DateTime values read from SQL Server have DateTimeKind.Utc
+    /// and are serialized to JSON with the 'Z' ISO-8601 suffix.
+    /// </summary>
+    public class DateTimeUtcTypeHandler : SqlMapper.TypeHandler<DateTime>
+    {
+        public override DateTime Parse(object value)
+        {
+            if (value is DateTime dt)
+            {
+                return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            }
+            if (DateTime.TryParse(value?.ToString(), null, System.Globalization.DateTimeStyles.AdjustToUniversal, out var parsed))
+            {
+                return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+            }
+            throw new InvalidCastException($"Cannot convert {value?.GetType()} to DateTime");
+        }
+
+        public override void SetValue(IDbDataParameter parameter, DateTime value)
+        {
+            parameter.DbType = DbType.DateTime2;
+            parameter.Value = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        }
+    }
 }

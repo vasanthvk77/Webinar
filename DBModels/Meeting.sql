@@ -284,6 +284,25 @@ BEGIN
           OR
           (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = m.WebinarId) >
           (SELECT COUNT(1) FROM wms.AttendeeMeetingLinks aml WHERE aml.MeetingId = m.Id)
+          OR
+          (
+              m.IsMeetingCreated = 1
+              AND (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = m.WebinarId) > 0
+              AND (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = m.WebinarId) =
+                  (SELECT COUNT(1) FROM wms.AttendeeMeetingLinks aml WHERE aml.MeetingId = m.Id)
+              AND EXISTS (
+                  SELECT 1 
+                  FROM wms.AttendeeMeetingLinks aml2
+                  INNER JOIN wms.WebinarRegistrations wr2 ON wr2.Id = aml2.WebinarRegistrationId
+                  WHERE aml2.MeetingId = m.Id
+                    AND NOT EXISTS (
+                        SELECT 1 FROM wms.EmailQueue eq 
+                        WHERE eq.WebinarId = m.WebinarId 
+                          AND eq.UserId = wr2.UserId 
+                          AND eq.EmailType = 'MEETING_JOIN_LINK'
+                    )
+              )
+          )
       )
     ORDER BY w.StartTime ASC;
 END
@@ -655,6 +674,73 @@ BEGIN
         VALUES 
             (@MeetingId, @WebinarRegistrationId, @JoinLink, @IsCreatedLink, SYSUTCDATETIME());
     END
+END
+GO
+
+-- ============================================================
+-- SP: wms.sp_QueueAttendeeMeetingJoinEmails
+-- Purpose : When BBB meeting is created and attendee links are generated
+--           for ALL registered students (TotalRegistrations == AttendeeLinksCount),
+--           queue personalized meeting join link emails in wms.EmailQueue.
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_QueueAttendeeMeetingJoinEmails' AND s.name = 'wms')
+    DROP PROCEDURE wms.sp_QueueAttendeeMeetingJoinEmails;
+GO
+
+CREATE PROCEDURE wms.sp_QueueAttendeeMeetingJoinEmails
+    @MeetingId BIGINT,
+    @WebinarId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- 1. Ensure meeting exists and is created on BBB
+    IF NOT EXISTS (SELECT 1 FROM wms.Meetings WHERE Id = @MeetingId AND IsMeetingCreated = 1)
+    BEGIN
+        SELECT 0 AS QueuedCount, 0 AS Success, 'Meeting is not created on BigBlueButton yet.' AS Message;
+        RETURN;
+    END
+
+    -- 2. Verify all registered students have links generated
+    DECLARE @TotalReg INT = 0;
+    DECLARE @TotalLinks INT = 0;
+
+    SELECT @TotalReg = COUNT(1) FROM wms.WebinarRegistrations WHERE WebinarId = @WebinarId;
+    SELECT @TotalLinks = COUNT(1) FROM wms.AttendeeMeetingLinks WHERE MeetingId = @MeetingId;
+
+    IF @TotalReg = 0 OR @TotalLinks < @TotalReg
+    BEGIN
+        SELECT 0 AS QueuedCount, 0 AS Success, 'Not all registered students have attendee links generated.' AS Message;
+        RETURN;
+    END
+
+    -- 3. Insert into wms.EmailQueue with EmailType = 'MEETING_JOIN_LINK' (idempotent, only unqueued students)
+    INSERT INTO wms.EmailQueue (WebinarId, UserId, EmailType, JoinLink, IsSent, TimeSent, CreatedAt)
+    SELECT 
+        @WebinarId,
+        wr.UserId,
+        'MEETING_JOIN_LINK',
+        aml.JoinLink,
+        NULL,
+        0,
+        GETUTCDATE()
+    FROM wms.AttendeeMeetingLinks aml
+    INNER JOIN wms.WebinarRegistrations wr ON wr.Id = aml.WebinarRegistrationId
+    INNER JOIN wms.Users u ON u.Id = wr.UserId
+    WHERE aml.MeetingId = @MeetingId
+      AND wr.WebinarId = @WebinarId
+      AND u.IsActive = 1
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM wms.EmailQueue eq 
+          WHERE eq.WebinarId = @WebinarId 
+            AND eq.UserId = wr.UserId 
+            AND eq.EmailType = 'MEETING_JOIN_LINK'
+      );
+
+    DECLARE @QueuedCount INT = @@ROWCOUNT;
+
+    SELECT @QueuedCount AS QueuedCount, 1 AS Success, 'Attendee meeting join emails queued successfully.' AS Message;
 END
 GO
 

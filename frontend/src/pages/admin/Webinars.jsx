@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box, Typography, Button, Paper, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, IconButton, Tooltip,
@@ -19,11 +19,16 @@ import SendIcon          from '@mui/icons-material/Send';
 import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
 import CalendarMonthIcon   from '@mui/icons-material/CalendarMonth';
 import AutorenewIcon       from '@mui/icons-material/Autorenew';
+import CloudUploadIcon     from '@mui/icons-material/CloudUpload';
+import ImageIcon           from '@mui/icons-material/Image';
+import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
+import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
 import toast             from 'react-hot-toast';
 import { webinarService, categoryService, certificateTemplateService, meetingService } from '../../services/api';
 import { useAuth }          from '../../context/AuthContext';
 import { useThemeColors }   from '../../context/ThemeContext';
 import CustomSearchBar      from '../../components/CustomSearchBar';
+import CustomPagination     from '../../components/CustomPagination';
 import CustomTimePicker     from '../../components/CustomeTimePicker';
 import CustomDatePicker     from '../../components/CustomeDatePicker';
 import {
@@ -65,6 +70,14 @@ const generateRandomMeetingId = () => {
   return res;
 };
 
+export const getFullWebinarImageUrl = (url) => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || 'https://localhost:7001').replace(/\/$/, '');
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${apiBase}${cleanPath}`;
+};
+
 const EMPTY_FORM = {
   webinarName:      '',
   categoryId:       '',
@@ -78,9 +91,10 @@ const EMPTY_FORM = {
   participantLimit: '',
   isPaid:           false,
   price:            '',
+  imageUrl:         '',
 };
 
-// ── Calculate duration in minutes from "HH:mm" strings ──
+// â”€â”€ Calculate duration in minutes from "HH:mm" strings â”€â”€
 const calcDuration = (start, end) => {
   if (!start || !end) return null;
   const [sh, sm] = start.split(':').map(Number);
@@ -89,9 +103,9 @@ const calcDuration = (start, end) => {
   return diff > 0 ? diff : null;
 };
 
-// ── Format duration nicely ───────────────────────────────
+// â”€â”€ Format duration nicely â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const fmtDuration = (mins) => {
-  if (!mins || mins <= 0) return '—';
+  if (!mins || mins <= 0) return '-';
   if (mins < 60) return `${mins} min`;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
@@ -114,6 +128,10 @@ export default function Webinars() {
   const [saving,    setSaving]    = useState(false);
   const [form,      setForm]      = useState(EMPTY_FORM);
   const [formError, setFormError] = useState('');
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
+  const [imagePreview, setImagePreview]           = useState(null);
+  const [uploadingImage, setUploadingImage]       = useState(false);
+  const imageInputRef                             = useRef(null);
 
   const [meetingForm, setMeetingForm]   = useState(EMPTY_MEETING_FORM);
   const [meetingError, setMeetingError] = useState('');
@@ -129,7 +147,7 @@ export default function Webinars() {
     [form.startTime, form.endTime]
   );
 
-  // ── Load ─────────────────────────────────────────────
+  // â”€â”€ Load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -150,7 +168,10 @@ export default function Webinars() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Search ───────────────────────────────────────────
+  // ── Pagination State ─────────────────────────────────
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   useEffect(() => {
     const q = search.toLowerCase();
     setFiltered(
@@ -160,13 +181,23 @@ export default function Webinars() {
             w.conductorName.toLowerCase().includes(q))
         : webinars
     );
+    setPage(1);
   }, [search, webinars]);
 
-  // ── Menu ─────────────────────────────────────────────
-  const openMenu  = (e, row) => setMenu({ anchorEl: e.currentTarget, row });
+  // ── Paginated Webinars ────────────────────────────────
+  const paginatedWebinars = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize]);
+
+  // â”€â”€ Menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const openMenu  = (e, row) => {
+    if (row?.isCompleted) return;
+    setMenu({ anchorEl: e.currentTarget, row });
+  };
   const closeMenu = ()       => setMenu(null);
 
-  // ── Helpers ───────────────────────────────────────────
+  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const setField = (key, val) => { setForm(p => ({ ...p, [key]: val })); setFormError(''); };
 
   const toISOLocal = (d) => formatUtcToLocalDateDDMMYYYY(d);
@@ -179,13 +210,19 @@ export default function Webinars() {
   // Extract local "YYYY-MM-DD" from stored UTC datetime string
   const toInputDate = (d) => formatUtcToLocalDateInput(d);
 
-  // ── Modals ───────────────────────────────────────────
+  // â”€â”€ Modals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const openCreate = () => {
-    setForm(EMPTY_FORM); setFormError(''); setModal('create');
+    setSelectedImageFile(null);
+    setImagePreview(null);
+    setForm(EMPTY_FORM);
+    setFormError('');
+    setModal('create');
   };
 
   const openEdit = (row) => {
     setTarget(row);
+    setSelectedImageFile(null);
+    setImagePreview(row.imageUrl ? getFullWebinarImageUrl(row.imageUrl) : null);
     setForm({
       webinarName:       row.webinarName,
       categoryId:        String(row.categoryId),
@@ -199,9 +236,28 @@ export default function Webinars() {
       participantLimit:  String(row.participantLimit),
       isPaid:            row.isPaid,
       price:             row.price != null ? String(row.price) : '',
+      imageUrl:          row.imageUrl || '',
     });
     setFormError('');
     setModal('edit');
+  };
+
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      toast.error('Only JPG, PNG, and WEBP formats are supported.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Webinar banner size must be under 10MB.');
+      return;
+    }
+
+    setSelectedImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
   };
 
   const openDelete = (row) => { setTarget(row); setModal('delete'); };
@@ -315,9 +371,17 @@ export default function Webinars() {
     }
   };
 
-  const closeModal = ()    => { setModal(null); setTarget(null); setSaving(false); setMeetingError(''); };
+  const closeModal = () => {
+    setModal(null);
+    setTarget(null);
+    setSaving(false);
+    setUploadingImage(false);
+    setSelectedImageFile(null);
+    setImagePreview(null);
+    setMeetingError('');
+  };
 
-  // ── Validate & build payload ──────────────────────────
+  // â”€â”€ Validate & build payload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const buildPayload = () => {
     if (!form.webinarName.trim())   return { err: 'Webinar name is required' };
     if (!form.categoryId)           return { err: 'Category is required' };
@@ -334,9 +398,18 @@ export default function Webinars() {
     if (form.isPaid && (!form.price || Number(form.price) <= 0))
                                     return { err: 'Price must be greater than 0 for paid webinars' };
 
-    // Combine WebinarDate + time-only strings into full datetime strings for backend
-    const startDateTime = `${form.webinarDate}T${form.startTime}:00`;
-    const endDateTime   = `${form.webinarDate}T${form.endTime}:00`;
+    // Parse user's selected date and time using their local system timezone (no hardcoded offset)
+    const [year, month, day] = form.webinarDate.split('-').map(Number);
+    const [startH, startM]   = form.startTime.split(':').map(Number);
+    const [endH, endM]       = form.endTime.split(':').map(Number);
+
+    // new Date(y, m-1, d, h, m) creates a Date in the user's local operating system timezone
+    const localStart = new Date(year, month - 1, day, startH, startM, 0);
+    const localEnd   = new Date(year, month - 1, day, endH, endM, 0);
+
+    // .toISOString() automatically converts the user's system local time into UTC with 'Z' suffix
+    const startDateTime = localStart.toISOString();
+    const endDateTime   = localEnd.toISOString();
 
     return {
       payload: {
@@ -353,20 +426,34 @@ export default function Webinars() {
         participantLimit:  Number(form.participantLimit),
         isPaid:            form.isPaid,
         price:             form.isPaid ? Number(form.price) : null,
+        imageUrl:          form.imageUrl || null,
       }
     };
   };
 
-  // ── Create ───────────────────────────────────────────
+  // â”€â”€ Create â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleCreate = async () => {
     setFormError('');
     const { err, payload } = buildPayload();
     if (err) return setFormError(err);
     setSaving(true);
     try {
+      let finalImageUrl = form.imageUrl || null;
+      if (selectedImageFile) {
+        setUploadingImage(true);
+        const uploadRes = await webinarService.uploadImage(selectedImageFile);
+        if (uploadRes.data?.success && uploadRes.data?.url) {
+          finalImageUrl = uploadRes.data.url;
+        }
+      }
+      payload.imageUrl = finalImageUrl;
+
       const res = await webinarService.create(payload);
-      if (res.data.success) { toast.success('Webinar created'); closeModal(); load(); }
-      else {
+      if (res.data.success) {
+        toast.success('Webinar created');
+        closeModal();
+        load();
+      } else {
         const errorMsg = res.data.message || 'Creation failed';
         setFormError(errorMsg);
         toast.error(errorMsg);
@@ -375,19 +462,36 @@ export default function Webinars() {
       const errorMsg = e.response?.data?.message || e.message || 'An error occurred';
       setFormError(errorMsg);
       toast.error(errorMsg);
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+      setUploadingImage(false);
+    }
   };
 
-  // ── Update ───────────────────────────────────────────
+  // â”€â”€ Update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleEdit = async () => {
     setFormError('');
     const { err, payload } = buildPayload();
     if (err) return setFormError(err);
     setSaving(true);
     try {
+      let finalImageUrl = form.imageUrl || null;
+      if (selectedImageFile) {
+        setUploadingImage(true);
+        // Pass existing image URL so the backend deletes the old image file from WebinarImages
+        const uploadRes = await webinarService.uploadImage(selectedImageFile, form.imageUrl);
+        if (uploadRes.data?.success && uploadRes.data?.url) {
+          finalImageUrl = uploadRes.data.url;
+        }
+      }
+      payload.imageUrl = finalImageUrl;
+
       const res = await webinarService.update(target.id, payload);
-      if (res.data.success) { toast.success('Webinar updated'); closeModal(); load(); }
-      else {
+      if (res.data.success) {
+        toast.success('Webinar updated');
+        closeModal();
+        load();
+      } else {
         const errorMsg = res.data.message || 'Update failed';
         setFormError(errorMsg);
         toast.error(errorMsg);
@@ -396,10 +500,13 @@ export default function Webinars() {
       const errorMsg = e.response?.data?.message || e.message || 'An error occurred';
       setFormError(errorMsg);
       toast.error(errorMsg);
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+      setUploadingImage(false);
+    }
   };
 
-  // ── Delete ────────────────────────────────────────────
+  // â”€â”€ Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleDelete = async () => {
     setSaving(true);
     try {
@@ -410,14 +517,14 @@ export default function Webinars() {
     } finally { setSaving(false); }
   };
 
-  // ── Share Link ─────────────────────────────────────────
+  // â”€â”€ Share Link â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleCopyShareLink = (w) => {
     const link = `${window.location.origin}/webinar-registration?trackingId=${w.shareId || w.id}`;
     navigator.clipboard.writeText(link);
     toast.success('Registration link copied to clipboard!');
   };
 
-  // ── Bulk Invite ────────────────────────────────────────
+  // â”€â”€ Bulk Invite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleBulkInvite = async (w) => {
     setBulkLoadingId(w.id);
     try {
@@ -448,7 +555,7 @@ export default function Webinars() {
           // Point 3: Confirmation snack to admin at UI like emails sent successfully
           toast.success(`All bulk invitation emails for "${webinarName}" have been sent successfully!`, {
             duration: 6000,
-            icon: '📨'
+            icon: 'ðŸ“¨'
           });
         } else if (attempts >= 60) {
           clearInterval(interval);
@@ -459,7 +566,7 @@ export default function Webinars() {
     }, 5000);
   };
 
-  // ── Regenerate Moderator Link ──────────────────────────
+  // â”€â”€ Regenerate Moderator Link â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleRegenerateLink = async (w) => {
     setRegeneratingId(w.id);
     const toastId = toast.loading(`Regenerating moderator link for "${w.webinarName}"...`);
@@ -480,7 +587,7 @@ export default function Webinars() {
     }
   };
 
-  // ── Shared styles ─────────────────────────────────────
+  // â”€â”€ Shared styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const inputSx = {
     '& .MuiOutlinedInput-root': {
       bgcolor: colors.surfaceAlt,
@@ -503,15 +610,23 @@ export default function Webinars() {
     </Typography>
   );
 
-  // ════════════════════════════════════════════════════
+  // â”€â”€ Table cell styles (compact so all columns fit the page width) â”€â”€
+  const headCellSx = {
+    fontSize: '11px', fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase',
+    letterSpacing: '0.4px', py: 1.5, px: 1.25, whiteSpace: 'nowrap',
+    overflow: 'hidden', textOverflow: 'ellipsis',
+  };
+  const bodyCellSx = { px: 1.25, py: 1.5, overflow: 'hidden', verticalAlign: 'middle' };
+
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   return (
     <Box>
-      {/* ── Header ── */}
+      {/* â”€â”€ Header â”€â”€ */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 700, color: colors.primary }}>Webinars</Typography>
           <Typography sx={{ fontSize: '13px', color: colors.textMuted, mt: 0.5 }}>
-            Manage webinars — create, edit and delete
+            Manage webinars - create, edit and delete
           </Typography>
         </Box>
         {isSuperAdmin && (
@@ -527,9 +642,9 @@ export default function Webinars() {
       </Box>
 
       {/* ── Search ── */}
-      <CustomSearchBar value={search} onChange={setSearch} placeholder="Search by name, category, conductor…" sx={{ mb: 2.5 }} />
+      <CustomSearchBar value={search} onChange={setSearch} placeholder="Search by name, category, conductor..." sx={{ mb: 2.5 }} />
 
-      {/* ── Table ── */}
+      {/* â”€â”€ Table â”€â”€ */}
       <Paper elevation={0} sx={{ border: `1px solid ${colors.border}`, borderRadius: 2, overflow: 'hidden' }}>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress sx={{ color: colors.accent }} /></Box>
@@ -540,145 +655,263 @@ export default function Webinars() {
             </Typography>
           </Box>
         ) : (
-          <TableContainer>
-            <Table>
+          <>
+            <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
+            {/* Fixed layout = columns share the available width, so the table fits the page
+                instead of scrolling. It only scrolls on very small screens (minWidth). */}
+            <Table sx={{ width: '100%', tableLayout: 'fixed', minWidth: 980 }}>
               <TableHead>
                 <TableRow sx={{ bgcolor: colors.surfaceAlt }}>
-                  {['#', 'Webinar', 'Category', 'Date', 'Time', 'Duration', 'Conductor', 'Limit', 'Price', 'Share & Invite', 'Action'].map(h => (
-                    <TableCell key={h} sx={{ fontSize: '11px', fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', py: 1.5 }}>
-                      {h}
-                    </TableCell>
-                  ))}
+                  <TableCell sx={{ ...headCellSx, width: '3%' }}>#</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Webinar</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '12%' }}>Category</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Date &amp; Time</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Conductor</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '6%' }}>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                      <PeopleAltOutlinedIcon sx={{ fontSize: 14, color: colors.textMuted }} />
+                      Regs.
+                    </Box>
+                  </TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '9%' }}>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                      <PaymentsOutlinedIcon sx={{ fontSize: 14, color: colors.textMuted }} />
+                      Payment
+                    </Box>
+                  </TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '6%' }}>Limit</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '7%' }}>Price</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Status</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '5%', textAlign: 'center' }}>Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filtered.map((w, idx) => (
-                  <TableRow key={w.id} sx={{ '&:hover': { bgcolor: colors.surfaceAlt }, transition: 'background 0.1s' }}>
-                    <TableCell sx={{ fontSize: '13px', color: colors.textMuted, width: 40 }}>{idx + 1}</TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                        <Box sx={{ width: 32, height: 32, borderRadius: 1.5, bgcolor: colors.accentMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {paginatedWebinars.map((w, idx) => {
+                  const itemIndex = (page - 1) * pageSize + idx + 1;
+                  return (
+                    <TableRow key={w.id} sx={{ '&:hover': { bgcolor: colors.surfaceAlt }, transition: 'background 0.1s', '&:last-child td': { borderBottom: 0 } }}>
+                      <TableCell sx={{ ...bodyCellSx, fontSize: '13px', color: colors.textMuted }}>{itemIndex}</TableCell>
+
+                    {/* Webinar */}
+                    <TableCell sx={bodyCellSx}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                        <Box sx={{ width: 30, height: 30, borderRadius: 1.5, bgcolor: colors.accentMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <VideoCallIcon sx={{ fontSize: 16, color: colors.accent }} />
                         </Box>
-                        <Typography sx={{ fontSize: '13.5px', fontWeight: 600, color: colors.primary, maxWidth: 180 }} noWrap>
-                          {w.webinarName}
-                        </Typography>
+                        <Tooltip title={w.webinarName} placement="top-start">
+                          <Typography sx={{ fontSize: '13px', fontWeight: 600, color: colors.primary, minWidth: 0 }} noWrap>
+                            {w.webinarName}
+                          </Typography>
+                        </Tooltip>
                       </Box>
                     </TableCell>
-                    <TableCell>
-                      <Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>{w.categoryName}</Typography>
+
+                    {/* Category + certificate */}
+                    <TableCell sx={bodyCellSx}>
+                      <Typography sx={{ fontSize: '13px', color: colors.textSecondary }} noWrap>{w.categoryName}</Typography>
                       {w.certificateTemplateName ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.4 }}>
-                          <WorkspacePremiumIcon sx={{ fontSize: 13, color: colors.accent }} />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.4, minWidth: 0 }}>
+                          <WorkspacePremiumIcon sx={{ fontSize: 13, color: colors.accent, flexShrink: 0 }} />
                           <Typography sx={{ fontSize: '11px', color: colors.accent, fontWeight: 500 }} noWrap>
                             {w.certificateTemplateName}
                           </Typography>
                         </Box>
                       ) : (
-                        <Typography sx={{ fontSize: '10.5px', color: colors.textMuted, mt: 0.4 }}>
+                        <Typography sx={{ fontSize: '10.5px', color: colors.textMuted, mt: 0.4 }} noWrap>
                           Default Certificate
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell sx={{ fontSize: '12px', color: colors.textMuted }}>{toISOLocal(w.startTime || w.webinarDate)}</TableCell>
-                    <TableCell sx={{ fontSize: '12px', color: colors.textMuted, whiteSpace: 'nowrap' }}>
-                      {fmtTime(w.startTime)} – {fmtTime(w.endTime)}
+
+                    {/* Date + Time + Duration in ONE column */}
+                    <TableCell sx={bodyCellSx}>
+                      <Typography sx={{ fontSize: '13px', fontWeight: 600, color: colors.textSecondary, whiteSpace: 'nowrap' }}>
+                        {toISOLocal(w.startTime || w.webinarDate)}
+                      </Typography>
+                      <Typography sx={{ fontSize: '11.5px', color: colors.textMuted, mt: 0.3, whiteSpace: 'nowrap' }}>
+                        {fmtTime(w.startTime)} - {fmtTime(w.endTime)}
+                      </Typography>
+                      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.4, mt: 0.4, color: colors.textMuted }}>
+                        <TimerIcon sx={{ fontSize: 12 }} />
+                        <Typography sx={{ fontSize: '11px', color: colors.textMuted }}>{fmtDuration(w.durationMinutes)}</Typography>
+                      </Box>
                     </TableCell>
-                    <TableCell sx={{ fontSize: '12px', color: colors.textMuted }}>{fmtDuration(w.durationMinutes)}</TableCell>
-                    <TableCell>
-                      <Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>{w.conductorName}</Typography>
-                      {w.conductorEmail && <Typography sx={{ fontSize: '11px', color: colors.textMuted }}>{w.conductorEmail}</Typography>}
+
+                    {/* Conductor */}
+                    <TableCell sx={bodyCellSx}>
+                      <Typography sx={{ fontSize: '13px', color: colors.textSecondary }} noWrap>{w.conductorName}</Typography>
+                      {w.conductorEmail && (
+                        <Tooltip title={w.conductorEmail} placement="bottom-start">
+                          <Typography sx={{ fontSize: '11px', color: colors.textMuted }} noWrap>{w.conductorEmail}</Typography>
+                        </Tooltip>
+                      )}
                     </TableCell>
-                    <TableCell sx={{ fontSize: '13px', color: colors.textSecondary }}>{w.participantLimit}</TableCell>
-                    <TableCell>
+
+                    {/* ── Regs. Count Badge ── */}
+                    <TableCell sx={bodyCellSx}>
+                      {(() => {
+                        const hasRegs = (w.registrationCount || 0) > 0;
+                        return (
+                          <Chip
+                            label={w.registrationCount || 0}
+                            size="small"
+                            sx={{
+                              bgcolor: hasRegs ? 'rgba(234, 179, 8, 0.14)' : colors.surfaceAlt,
+                              color: hasRegs ? '#b45309' : colors.textMuted,
+                              border: hasRegs ? '1px solid rgba(234, 179, 8, 0.35)' : `1px solid ${colors.border}`,
+                              fontWeight: 700,
+                              fontSize: '12px',
+                              borderRadius: '999px',
+                              px: 0.5,
+                              height: 24,
+                              minWidth: 32
+                            }}
+                          />
+                        );
+                      })()}
+                    </TableCell>
+
+                    {/* ── Collected Payment (count * amount) Badge ── */}
+                    <TableCell sx={bodyCellSx}>
+                      {(() => {
+                        const regCount = w.registrationCount || 0;
+                        const price = w.isPaid ? (w.price || 0) : 0;
+                        const collectedPayment = Math.round(regCount * price);
+                        const hasRevenue = collectedPayment > 0;
+                        return (
+                          <Chip
+                            icon={
+                              <PaymentsOutlinedIcon
+                                sx={{
+                                  fontSize: '14px !important',
+                                  color: hasRevenue ? '#b45309 !important' : `${colors.textMuted} !important`
+                                }}
+                              />
+                            }
+                            label={`₹${collectedPayment.toLocaleString('en-IN')}`}
+                            size="small"
+                            sx={{
+                              bgcolor: hasRevenue ? 'rgba(234, 179, 8, 0.14)' : colors.surfaceAlt,
+                              color: hasRevenue ? '#b45309' : colors.textMuted,
+                              border: hasRevenue ? '1px solid rgba(234, 179, 8, 0.35)' : `1px solid ${colors.border}`,
+                              fontWeight: 700,
+                              fontSize: '12px',
+                              borderRadius: '999px',
+                              px: 0.6,
+                              height: 24,
+                              maxWidth: '100%',
+                              '& .MuiChip-icon': { ml: 0.5, mr: -0.2 }
+                            }}
+                          />
+                        );
+                      })()}
+                    </TableCell>
+
+                    <TableCell sx={{ ...bodyCellSx, fontSize: '13px', color: colors.textSecondary }}>{w.participantLimit}</TableCell>
+                    <TableCell sx={bodyCellSx}>
                       {w.isPaid
                         ? <Chip label={`₹${w.price}`} size="small" sx={{ fontSize: '11px', fontWeight: 700, bgcolor: 'rgba(34,197,94,0.12)', color: colors.success }} />
                         : <Chip label="Free"          size="small" sx={{ fontSize: '11px', fontWeight: 700, bgcolor: colors.surfaceAlt, color: colors.textMuted }} />
                       }
                     </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Tooltip title="Copy Share Link">
-                          <IconButton size="small" onClick={() => handleCopyShareLink(w)} sx={{ color: colors.accent, '&:hover': { bgcolor: colors.accentMuted } }}>
-                            <ContentCopyIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Send Bulk Invite">
-                          <IconButton
-                            size="small"
-                            onClick={() => handleBulkInvite(w)}
-                            disabled={bulkLoadingId === w.id}
-                            sx={{ color: colors.primary, '&:hover': { bgcolor: colors.surfaceAlt } }}
-                          >
-                            {bulkLoadingId === w.id ? (
-                              <CircularProgress size={16} sx={{ color: colors.primary }} />
-                            ) : (
-                              <SendIcon sx={{ fontSize: 16 }} />
-                            )}
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
+
+                    {/* Status / quick actions */}
+                    <TableCell sx={bodyCellSx}>
+                      {Boolean(w.isCompleted) ? (
+                        <Chip
+                          label="Completed"
+                          size="small"
+                          sx={{
+                            bgcolor: 'rgba(147, 51, 234, 0.12)',
+                            color: '#9333EA',
+                            fontWeight: 700,
+                            fontSize: '11px',
+                            borderRadius: 1.5,
+                            py: 0.2
+                          }}
+                        />
+                      ) : (
+                        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                            <Tooltip title="Copy Share Link">
+                              <IconButton size="small" onClick={() => handleCopyShareLink(w)} sx={{ color: colors.accent, '&:hover': { bgcolor: colors.accentMuted } }}>
+                                <ContentCopyIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Send Bulk Invite">
+                              <IconButton
+                                size="small"
+                                onClick={() => handleBulkInvite(w)}
+                                disabled={bulkLoadingId === w.id}
+                                sx={{ color: colors.primary, '&:hover': { bgcolor: colors.surfaceAlt } }}
+                              >
+                                {bulkLoadingId === w.id ? (
+                                  <CircularProgress size={16} sx={{ color: colors.primary }} />
+                                ) : (
+                                  <SendIcon sx={{ fontSize: 16 }} />
+                                )}
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                          {Boolean(w.isMeetingCreated) && w.moderatorJoinUrl ? (
+                            <Button
+                              variant="contained"
+                              size="small"
+                              disabled={regeneratingId === w.id}
+                              startIcon={regeneratingId === w.id ? <CircularProgress size={14} color="inherit" /> : <VideoCallIcon sx={{ fontSize: 16 }} />}
+                              onClick={() => window.open(w.moderatorJoinUrl, '_blank', 'noopener,noreferrer')}
+                              sx={{
+                                bgcolor: colors.success,
+                                color: '#fff',
+                                '&:hover': { bgcolor: '#16a34a' },
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                textTransform: 'none',
+                                py: 0.4,
+                                px: 1.2,
+                                borderRadius: 1.5,
+                                whiteSpace: 'nowrap',
+                                boxShadow: 'none',
+                              }}
+                            >
+                              {regeneratingId === w.id ? 'Regenerating...' : 'Join Webinar'}
+                            </Button>
+                          ) : null}
+                        </Box>
+                      )}
                     </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {Boolean(w.isCompleted) ? (
-                          <Chip
-                            label="Completed"
-                            size="small"
-                            sx={{
-                              bgcolor: 'rgba(147, 51, 234, 0.12)',
-                              color: '#9333EA',
-                              fontWeight: 700,
-                              fontSize: '11px',
-                              borderRadius: 1.5,
-                              py: 0.2
-                            }}
-                          />
-                        ) : Boolean(w.isMeetingCreated) && w.moderatorJoinUrl ? (
-                          <Button
-                            variant="contained"
-                            size="small"
-                            disabled={regeneratingId === w.id}
-                            startIcon={regeneratingId === w.id ? <CircularProgress size={14} color="inherit" /> : <VideoCallIcon sx={{ fontSize: 16 }} />}
-                            onClick={() => window.open(w.moderatorJoinUrl, '_blank', 'noopener,noreferrer')}
-                            sx={{
-                              bgcolor: colors.success,
-                              color: '#fff',
-                              '&:hover': { bgcolor: '#16a34a' },
-                              fontSize: '11px',
-                              fontWeight: 700,
-                              textTransform: 'none',
-                              py: 0.4,
-                              px: 1.2,
-                              borderRadius: 1.5,
-                              whiteSpace: 'nowrap',
-                              boxShadow: 'none',
-                            }}
-                          >
-                            {regeneratingId === w.id ? 'Regenerating...' : 'Join Webinar'}
-                          </Button>
-                        ) : null}
-                        {isSuperAdmin && (
-                          <Tooltip title="Actions">
-                            <IconButton size="small" onClick={e => openMenu(e, w)} sx={{ color: colors.textMuted, '&:hover': { color: colors.primary } }}>
-                              <MoreVertIcon sx={{ fontSize: 18 }} />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                      </Box>
+
+                    <TableCell sx={{ ...bodyCellSx, textAlign: 'center' }}>
+                      {isSuperAdmin && !w.isCompleted ? (
+                        <Tooltip title="Actions">
+                          <IconButton size="small" onClick={e => openMenu(e, w)} sx={{ color: colors.textMuted, '&:hover': { color: colors.primary } }}>
+                            <MoreVertIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </Tooltip>
+                      ) : null}
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>
+          <CustomPagination
+            totalItems={filtered.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 20, 30, 50, 100]}
+          />
+        </>
         )}
       </Paper>
 
-      {/* ── 3-dot menu ── */}
+      {/* â”€â”€ 3-dot menu (only for active/upcoming webinars) â”€â”€ */}
       <Menu
         anchorEl={menu?.anchorEl}
-        open={Boolean(menu)}
+        open={Boolean(menu) && !menu?.row?.isCompleted}
         onClose={closeMenu}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
         anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
@@ -741,9 +974,9 @@ export default function Webinars() {
         </MenuItem>
       </Menu>
 
-      {/* ══════════════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           CREATE / EDIT MODAL
-      ══════════════════════════════════════════════════ */}
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       <Dialog
         open={modal === 'create' || modal === 'edit'}
         onClose={closeModal}
@@ -775,7 +1008,119 @@ export default function Webinars() {
 
         <DialogContent sx={{ px: 3.5, pt: 2.5, pb: 1 }}>
 
-          {/* Row 1 — Webinar Name + Category */}
+          {/* Webinar Thumbnail / Cover Image Upload */}
+          <Box sx={{ mb: 2.5 }}>
+            <Label text="Webinar Cover Image" />
+            <Box
+              sx={{
+                p: 2,
+                borderRadius: '16px',
+                border: '1.5px dashed',
+                borderColor: imagePreview ? colors.accent : colors.border,
+                bgcolor: colors.surfaceAlt,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2.5,
+                transition: 'border-color 0.2s',
+              }}
+            >
+              {/* Preview Thumbnail Box */}
+              <Box
+                sx={{
+                  width: 90,
+                  height: 64,
+                  borderRadius: '12px',
+                  bgcolor: colors.surface,
+                  border: `1px solid ${colors.border}`,
+                  overflow: 'hidden',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                }}
+              >
+                {imagePreview ? (
+                  <Box
+                    component="img"
+                    src={imagePreview}
+                    alt="Webinar Preview"
+                    sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  <ImageIcon sx={{ fontSize: 32, color: colors.textMuted }} />
+                )}
+              </Box>
+
+              {/* Upload Controls & Instructions */}
+              <Box sx={{ flex: 1 }}>
+                <Typography sx={{ fontSize: '13px', fontWeight: 600, color: colors.textPrimary, mb: 0.25 }}>
+                  {imagePreview ? 'Cover Image Selected' : 'Upload Webinar Thumbnail'}
+                </Typography>
+                <Typography sx={{ fontSize: '11.5px', color: colors.textMuted, mb: 1 }}>
+                  PNG, JPG, or WEBP up to 10MB (stored in WebinarImages folder)
+                </Typography>
+
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <input
+                    type="file"
+                    ref={imageInputRef}
+                    accept="image/jpeg,image/png,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={handleImageSelect}
+                  />
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<CloudUploadIcon sx={{ fontSize: 16 }} />}
+                    onClick={() => imageInputRef.current?.click()}
+                    sx={{
+                      borderRadius: '10px',
+                      textTransform: 'none',
+                      fontSize: '12px',
+                      fontWeight: 650,
+                      borderColor: colors.accent,
+                      color: colors.accent,
+                      py: 0.4,
+                      px: 1.5,
+                      '&:hover': {
+                        borderColor: colors.accent,
+                        bgcolor: 'rgba(236, 145, 9, 0.08)',
+                      },
+                    }}
+                  >
+                    {imagePreview ? 'Change Image' : 'Select Image'}
+                  </Button>
+
+                  {imagePreview && (
+                    <Button
+                      size="small"
+                      color="inherit"
+                      onClick={() => {
+                        setSelectedImageFile(null);
+                        setImagePreview(null);
+                        setField('imageUrl', '');
+                        if (imageInputRef.current) imageInputRef.current.value = '';
+                      }}
+                      sx={{
+                        borderRadius: '10px',
+                        textTransform: 'none',
+                        fontSize: '12px',
+                        color: colors.textMuted,
+                        py: 0.4,
+                        px: 1.25,
+                        '&:hover': { color: colors.error },
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </Box>
+              </Box>
+            </Box>
+          </Box>
+
+          {/* Row 1 â€” Webinar Name + Category */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 2 }}>
               <Label text="Webinar Name" required />
@@ -796,7 +1141,7 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row 2 — Certificate Template + Webinar Date + Participant Limit */}
+          {/* Row 2 â€” Certificate Template + Webinar Date + Participant Limit */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 1.2 }}>
               <Label text="Certificate Template" />
@@ -854,7 +1199,7 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row 3 — Start Time + End Time + Duration (auto) */}
+          {/* Row 3 â€” Start Time + End Time + Duration (auto) */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 1 }}>
               <CustomTimePicker
@@ -876,10 +1221,10 @@ export default function Webinars() {
             </Box>
             <Box sx={{ flex: 1 }}>
               <Label text="Duration" />
-              {/* Read-only — calculated automatically */}
+              {/* Read-only - calculated automatically */}
               <TextField
                 fullWidth size="small"
-                value={calculatedDuration ? fmtDuration(calculatedDuration) : '—'}
+                value={calculatedDuration ? fmtDuration(calculatedDuration) : '-'}
                 InputProps={{
                   readOnly: true,
                   startAdornment: (
@@ -895,7 +1240,7 @@ export default function Webinars() {
 
           <Divider sx={{ borderColor: colors.border, my: 2 }} />
 
-          {/* Row 4 — Conductor Name + Phone + Email */}
+          {/* Row 4 â€” Conductor Name + Phone + Email */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 1 }}>
               <Label text="Conductor Name" required />
@@ -916,7 +1261,7 @@ export default function Webinars() {
 
           <Divider sx={{ borderColor: colors.border, my: 2 }} />
 
-          {/* Row 5 — IsPaid toggle + Price */}
+          {/* Row 5 â€” IsPaid toggle + Price */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 3, mb: 1 }}>
             <Box sx={{ pt: 0.5 }}>
               <FormControlLabel
@@ -969,19 +1314,19 @@ export default function Webinars() {
           <Button
             variant="contained"
             onClick={modal === 'edit' ? handleEdit : handleCreate}
-            disabled={saving}
+            disabled={saving || uploadingImage}
             sx={{ bgcolor: colors.accent, color: colors.textOnAccent, '&:hover': { bgcolor: colors.accentDark }, fontWeight: 700, borderRadius: 2, minWidth: 120 }}
           >
-            {saving
+            {saving || uploadingImage
               ? <CircularProgress size={18} sx={{ color: colors.textOnAccent }} />
               : modal === 'edit' ? 'Save Changes' : 'Create Webinar'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* ══════════════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           DELETE CONFIRM MODAL
-      ══════════════════════════════════════════════════ */}
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       <Dialog
         open={modal === 'delete'}
         onClose={closeModal}
@@ -1016,9 +1361,9 @@ export default function Webinars() {
         </DialogActions>
       </Dialog>
 
-      {/* ══════════════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           SCHEDULE MEETING MODAL
-      ══════════════════════════════════════════════════ */}
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
       <Dialog
         open={modal === 'schedule'}
         onClose={closeModal}
@@ -1049,7 +1394,7 @@ export default function Webinars() {
         <Divider sx={{ borderColor: colors.border }} />
 
         <DialogContent sx={{ px: 3.5, pt: 2.5, pb: 1 }}>
-          {/* Row 1 — Meeting Name + Meeting ID */}
+          {/* Row 1 â€” Meeting Name + Meeting ID */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 2 }}>
               <Label text="Meeting Name" required />
@@ -1076,7 +1421,7 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row — Role Passwords (Generated) */}
+          {/* Row â€” Role Passwords (Generated) */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 1 }}>
               <Label text="Moderator Password (Generated)" required />
@@ -1104,7 +1449,7 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row 2 — Max Participants + Duration + Logout URL */}
+          {/* Row 2 â€” Max Participants + Duration + Logout URL */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 1 }}>
               <Label text="Max Participants" required />
@@ -1143,7 +1488,7 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row 3 — Expiry Settings */}
+          {/* Row 3 â€” Expiry Settings */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 1 }}>
               <Label text="Expire If No User Joined (Mins)" />
@@ -1171,7 +1516,7 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row 4 — Policies & Layout */}
+          {/* Row 4 â€” Policies & Layout */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <Box sx={{ flex: 1 }}>
               <Label text="Guest Policy" />
@@ -1221,7 +1566,7 @@ export default function Webinars() {
             </Box>
           </Box>
 
-          {/* Row 5 — Flags & Toggles */}
+          {/* Row 5 â€” Flags & Toggles */}
           <Box
             sx={{
               p: 2,

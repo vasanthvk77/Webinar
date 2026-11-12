@@ -1077,6 +1077,35 @@ const WebinarRegistration = ({ mode }) => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const countdownIntervalRef = useRef(null);
+
+  // Seat Hold state (BookMyShow dual-clock pattern)
+  const [activeHoldToken, setActiveHoldToken] = useState(() => localStorage.getItem(`hold_${trackingId}`) || null);
+  const [holdCountdown, setHoldCountdown] = useState(300);
+  const holdIntervalRef = useRef(null);
+
+  const startHoldTimer = (seconds = 300) => {
+    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+    setHoldCountdown(seconds);
+    holdIntervalRef.current = setInterval(() => {
+      setHoldCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(holdIntervalRef.current);
+          setActiveHoldToken(null);
+          localStorage.removeItem(`hold_${trackingId}`);
+          toast.error("Your 5-minute reservation hold has expired. Please select your seat again.");
+          setWebinarStep("preview");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+    };
+  }, []);
   const [formData, setFormData] = useState({
     firstName: "", lastName: "", email: "", password: "",
     countryCode: "+1", mobileNumber: ""
@@ -1087,11 +1116,56 @@ const WebinarRegistration = ({ mode }) => {
 
   const applicationUrl = `${window.location.origin}/dashboard`;
 
+  // Restore authenticated session from localStorage if present
+  useEffect(() => {
+    try {
+      const rawUser = localStorage.getItem('user');
+      if (rawUser) {
+        const u = JSON.parse(rawUser);
+        if (u && (u.id || u.userId)) {
+          const uid = u.id || u.userId;
+          setExistingUser({ ...u, userId: uid });
+          setPendingUser({
+            id: uid,
+            firstName: u.firstName,
+            email: u.email
+          });
+          setFormData((prev) => ({
+            ...prev,
+            email: u.email || prev.email,
+            firstName: u.firstName || prev.firstName,
+            lastName: u.lastName || prev.lastName
+          }));
+        }
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     if (!trackingId) return;
     webinarService.getPublic(trackingId)
       .then((res) => { if (res.data?.success) setWebinarInfo(res.data.data); })
       .catch(() => {});
+  }, [trackingId]);
+
+  // Check and restore active seat reservation hold on mount if active
+  useEffect(() => {
+    if (!trackingId) return;
+    const token = localStorage.getItem(`hold_${trackingId}`);
+    const expiresStr = localStorage.getItem(`hold_expires_${trackingId}`);
+    if (token && expiresStr) {
+      const expiresUtc = new Date(expiresStr).getTime();
+      const nowUtc = Date.now();
+      const remainingSec = Math.floor((expiresUtc - nowUtc) / 1000);
+      if (remainingSec > 0) {
+        setActiveHoldToken(token);
+        startHoldTimer(Math.min(remainingSec, 300));
+      } else {
+        localStorage.removeItem(`hold_${trackingId}`);
+        localStorage.removeItem(`hold_expires_${trackingId}`);
+        setActiveHoldToken(null);
+      }
+    }
   }, [trackingId]);
 
   useEffect(() => {
@@ -1128,6 +1202,11 @@ const WebinarRegistration = ({ mode }) => {
     setFormData((prev) => ({ ...prev, mobileNumber: phone.replaceAll(/[^0-9+]/g, "") }));
   };
 
+  const handleStartRegistration = () => {
+    setError("");
+    setWebinarStep("enter_email");
+  };
+
   const handleCheckEmail = async (e) => {
     e.preventDefault();
     setError("");
@@ -1145,6 +1224,27 @@ const WebinarRegistration = ({ mode }) => {
           firstName: existing.firstName,
           email: existing.email || formData.email
         });
+
+        // Atomically hold seat for this identified user
+        try {
+          const holdRes = await webinarService.holdSeat(trackingId, existing.userId);
+          if (holdRes.data?.success && holdRes.data?.data) {
+            const hData = holdRes.data.data;
+            setActiveHoldToken(hData.holdToken);
+            localStorage.setItem(`hold_${trackingId}`, hData.holdToken);
+            localStorage.setItem(`hold_expires_${trackingId}`, hData.expiresAt);
+            startHoldTimer(hData.remainingSeconds || 300);
+          } else if (holdRes.data?.isCapacityFull) {
+            setError("Webinar capacity reached / Sold Out.");
+            return;
+          }
+        } catch (holdErr) {
+          if (holdErr.response?.status === 409) {
+            setError("Webinar capacity reached / Sold Out.");
+            return;
+          }
+        }
+
         if (webinarInfo?.isPaid) setWebinarStep("payment");
         else setWebinarStep("existing_user_confirm");
       } else {
@@ -1167,8 +1267,12 @@ const WebinarRegistration = ({ mode }) => {
         setError("We couldn't verify the account. Please enter your email again.");
         return;
       }
-      const res = await webinarService.registerTracking(trackingId, userId);
-      if (res.data?.success) setShowSuccessModal(true);
+      const res = await webinarService.registerTracking(trackingId, userId, activeHoldToken);
+      if (res.data?.success) {
+        localStorage.removeItem(`hold_${trackingId}`);
+        localStorage.removeItem(`hold_expires_${trackingId}`);
+        setShowSuccessModal(true);
+      }
       else setError(res.data?.message || "Registration failed. Please try again.");
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed. Please try again.");
@@ -1205,12 +1309,29 @@ const WebinarRegistration = ({ mode }) => {
         localStorage.setItem("token", response.data.token);
         localStorage.setItem("user", JSON.stringify(user));
         localStorage.setItem("firstName", user.firstName);
+
+        // Atomically hold seat for the newly created user
+        try {
+          const holdRes = await webinarService.holdSeat(trackingId, user.id);
+          if (holdRes.data?.success && holdRes.data?.data) {
+            const hData = holdRes.data.data;
+            setActiveHoldToken(hData.holdToken);
+            localStorage.setItem(`hold_${trackingId}`, hData.holdToken);
+            localStorage.setItem(`hold_expires_${trackingId}`, hData.expiresAt);
+            startHoldTimer(hData.remainingSeconds || 300);
+          }
+        } catch {}
+
         if (webinarInfo?.isPaid) {
           setPendingUser(user);
           setWebinarStep("payment");
         } else {
-          const reg = await webinarService.registerTracking(trackingId, user.id);
-          if (reg.data?.success) setShowSuccessModal(true);
+          const reg = await webinarService.registerTracking(trackingId, user.id, activeHoldToken);
+          if (reg.data?.success) {
+            localStorage.removeItem(`hold_${trackingId}`);
+            localStorage.removeItem(`hold_expires_${trackingId}`);
+            setShowSuccessModal(true);
+          }
           else setError(reg.data?.message || "Account created, but registration could not be completed. Please try again.");
         }
       } else setError(response.data.message || "Registration failed");
@@ -1224,14 +1345,27 @@ const WebinarRegistration = ({ mode }) => {
   const handleCompletePayment = async () => {
     setPaying(true);
     try {
-      const userId = pendingUser?.id || existingUser?.userId || existingUser?.id;
+      let userId = pendingUser?.id || existingUser?.userId || existingUser?.id;
+      if (!userId) {
+        try {
+          const rawUser = localStorage.getItem('user');
+          if (rawUser) {
+            const u = JSON.parse(rawUser);
+            userId = u?.id || u?.userId;
+          }
+        } catch {}
+      }
       if (!userId) {
         toast.error("We couldn't identify your account. Please start again.");
         return;
       }
       // Connect this action to the real payment gateway/order verification flow.
-      const regRes = await webinarService.registerTracking(trackingId, userId);
-      if (regRes.data?.success) setShowSuccessModal(true);
+      const regRes = await webinarService.registerTracking(trackingId, userId, activeHoldToken);
+      if (regRes.data?.success) {
+        localStorage.removeItem(`hold_${trackingId}`);
+        localStorage.removeItem(`hold_expires_${trackingId}`);
+        setShowSuccessModal(true);
+      }
       else toast.error(regRes.data?.message || "Payment could not be confirmed.");
     } catch (err) {
       toast.error(err.response?.data?.message || "There was a problem processing your request.");
@@ -1288,6 +1422,8 @@ const WebinarRegistration = ({ mode }) => {
 
   const info = webinarInfo || {};
   const amount = Number(info.price || 0).toLocaleString("en-IN");
+  const isCapacityFull = Boolean(info.participantLimit && info.participantLimit > 0 && (info.registrationCount || 0) >= info.participantLimit);
+  const isSessionEnded = Boolean(info.isCompleted || (info.endTime && new Date(info.endTime) < new Date()));
 
   const stepTitle = {
     enter_email: "Save your seat",
@@ -1307,7 +1443,7 @@ const WebinarRegistration = ({ mode }) => {
     { icon: Calendar, label: "Date", value: formatDate(info.webinarDate) },
     { icon: Clock, label: "Time & duration", value: `${formatTime(info.webinarDate)} · ${info.durationMinutes || 60} min` },
     { icon: User, label: "Speaker", value: info.conductorName || "Expert speaker" },
-    { icon: Users, label: "Seats", value: info.capacity ? `${info.capacity} seats total` : "Open registration" }
+    { icon: Users, label: "Seats", value: info.participantLimit ? `${info.participantLimit} seats total` : "Open registration" }
   ];
 
   const stepLabels = ["Account", info.isPaid ? "Payment" : "Confirm"];
@@ -1457,32 +1593,73 @@ const WebinarRegistration = ({ mode }) => {
                         </Stack>
                       ))}
                     </Stack>
-                    <Button fullWidth onClick={() => setWebinarStep("enter_email")} endIcon={<ArrowRight size={18} />} sx={primaryButtonSx}>
-                      Register for webinar
+                    {error && (
+                      <Typography role="alert" sx={{ color: colors.danger, fontSize: 13 }}>
+                        {error}
+                      </Typography>
+                    )}
+                    <Button
+                      fullWidth
+                      disabled={checkingEmail || isSessionEnded || isCapacityFull}
+                      onClick={handleStartRegistration}
+                      endIcon={!checkingEmail && !isSessionEnded && !isCapacityFull && <ArrowRight size={18} />}
+                      sx={primaryButtonSx}
+                    >
+                      {checkingEmail ? (
+                        <CircularProgress size={22} sx={{ color: "#fff" }} />
+                      ) : isSessionEnded ? (
+                        "Webinar Ended"
+                      ) : isCapacityFull ? (
+                        "Capacity Full / Sold Out"
+                      ) : (
+                        "Register for webinar"
+                      )}
                     </Button>
                   </Stack>
                 )}
 
                 {webinarStep !== "preview" && (
                   <>
-                    {/* Step indicator */}
-                    <Stack direction="row" spacing={1.5} sx={{ mb: 2.5 }}>
-                      {stepLabels.map((label, index) => {
-                        const done = index < activeStep;
-                        const current = index === activeStep;
-                        return (
-                          <Box key={label} sx={{ flex: 1 }}>
-                            <Box sx={{ height: 4, borderRadius: 4, bgcolor: done || current ? colors.primary : colors.line, mb: 1 }} />
-                            <Stack direction="row" spacing={.75} alignItems="center">
-                              {done && <Check size={13} color={colors.primary} />}
-                              <Typography sx={{ fontSize: 12.5, fontWeight: current ? FW.semibold : FW.regular, color: current || done ? colors.text : colors.muted }}>
-                                {index + 1}. {label}
-                              </Typography>
-                            </Stack>
-                          </Box>
-                        );
-                      })}
-                    </Stack>
+                    {/* Step indicator & Live Hold Timer */}
+                    <Box sx={{ mb: 2.5, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 1 }}>
+                      <Stack direction="row" spacing={1.5} sx={{ flex: 1, minWidth: 200 }}>
+                        {stepLabels.map((label, index) => {
+                          const done = index < activeStep;
+                          const current = index === activeStep;
+                          return (
+                            <Box key={label} sx={{ flex: 1 }}>
+                              <Box sx={{ height: 4, borderRadius: 4, bgcolor: done || current ? colors.primary : colors.line, mb: 1 }} />
+                              <Stack direction="row" spacing={.75} alignItems="center">
+                                {done && <Check size={13} color={colors.primary} />}
+                                <Typography sx={{ fontSize: 12.5, fontWeight: current ? FW.semibold : FW.regular, color: current || done ? colors.text : colors.muted }}>
+                                  {index + 1}. {label}
+                                </Typography>
+                              </Stack>
+                            </Box>
+                          );
+                        })}
+                      </Stack>
+
+                      {/* Live 5:00 Hold Countdown Indicator */}
+                      {activeHoldToken && (
+                        <Box sx={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: .75,
+                          px: 1.5,
+                          py: .5,
+                          borderRadius: "100px",
+                          bgcolor: holdCountdown <= 60 ? "#fee2e2" : "#fef3c7",
+                          border: `1px solid ${holdCountdown <= 60 ? "#fca5a5" : "#fde68a"}`,
+                          color: holdCountdown <= 60 ? "#dc2626" : "#b45309",
+                          fontSize: 12,
+                          fontWeight: FW.semibold
+                        }}>
+                          <Clock size={13} />
+                          <span>Seat Held: {Math.floor(holdCountdown / 60)}:{String(holdCountdown % 60).padStart(2, "0")}</span>
+                        </Box>
+                      )}
+                    </Box>
 
                     <Typography sx={{ fontSize: { xs: 26, sm: 30 }, fontWeight: FW.semibold, letterSpacing: "-.02em", lineHeight: 1.2 }}>
                       {stepTitle}

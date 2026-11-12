@@ -19,7 +19,9 @@ import { webinarService }   from '../../services/api';
 import { useAuth }          from '../../context/AuthContext';
 import { useThemeColors }   from '../../context/ThemeContext';
 import CustomSearchBar      from '../../components/CustomSearchBar';
-import { formatUtcToLocalDateOnly, formatUtcToLocalTimeOnly } from '../../utils/validation';
+import CardComponent, { WebinarPageHeader } from '../../components/CardComponent';
+import { BookOpen, Calendar as CalendarIcon, Clock } from 'lucide-react';
+import { formatUtcToLocalDateOnly, formatUtcToLocalTimeOnly, isWebinarStartTimePast } from '../../utils/validation';
 
 // Helper: Format Date
 const formatDate = (dateStr) => formatUtcToLocalDateOnly(dateStr);
@@ -161,277 +163,28 @@ export default function RegisteredWebinars() {
         width: '100%'
       }}
     >
-      {/* ── Top Hero Box (Tempting Student Learning Hub Banner) ──────────────── */}
-      <Box
-        sx={{
-          mb: 2.5,
-          px: { xs: 2.5, sm: 4 },
-          py: { xs: 2.75, sm: 3.25 },
-          borderRadius: '20px',
-          background: 'radial-gradient(circle at 90% 15%, rgba(242,183,5,0.25) 0%, transparent 40%), radial-gradient(circle at 15% 90%, rgba(56,189,248,0.12) 0%, transparent 35%), linear-gradient(125deg, #0F172A 0%, #1E293B 60%, #172554 100%)',
-          color: '#FFFFFF',
-          boxShadow: '0 20px 40px -15px rgba(15, 23, 42, 0.28)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          position: 'relative',
-          overflow: 'hidden',
-          '&:before': {
-            content: '""',
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 6,
-            background: 'linear-gradient(180deg, #FDE047 0%, #F2B705 50%, #D97706 100%)',
-          },
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 2.5,
-          flexShrink: 0,
-        }}
-      >
-        {/* Left Title & Description */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.25 }}>
-          <Box
-            sx={{
-              width: 60,
-              height: 60,
-              borderRadius: '18px',
-              background: 'linear-gradient(135deg, #FDE047 0%, #F2B705 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 10px 25px rgba(242,183,5,0.35)',
-              flexShrink: 0,
-            }}
-          >
-            <BookmarkAddedIcon sx={{ color: '#0F172A', fontSize: 32 }} />
-          </Box>
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap', mb: 0.5 }}>
-              <Typography
-                variant="h5"
-                sx={{
-                  fontWeight: 800,
-                  color: '#FFFFFF',
-                  letterSpacing: '-0.5px',
-                  lineHeight: 1.2,
-                  fontSize: { xs: '1.35rem', sm: '1.6rem' }
-                }}
-              >
-                Registered Webinars
-              </Typography>
-            
-            </Box>
-            <Typography
-              variant="body2"
-              sx={{
-                color: 'rgba(255,255,255,0.78)',
-                fontWeight: 400,
-                fontSize: { xs: '0.85rem', sm: '0.92rem' },
-                maxWidth: 560,
-              }}
-            >
-              Your enrolled sessions schedule, live meeting rooms, and calendar reminders in one place.
-            </Typography>
-          </Box>
-        </Box>
+      {/* ── Top Row Section: Dashboard Metrics & Controls ───────────── */}
+      <WebinarPageHeader
+        title="Registered Webinars"
+        subtitle="Manage your scheduled video workshops, live links, and attendance details."
+        metrics={[
+          { label: 'Enrolled Webinars', value: stats.total, type: 'orange' },
+          { label: 'Upcoming Sessions', value: stats.upcoming, type: 'blue' },
+          { label: 'Completed Sessions', value: stats.completed, type: 'green' },
+          { label: 'Total Hours', value: `${stats.hours}h`, type: 'purple' },
+        ]}
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search registered sessions..."
+        filters={[
+          { id: 'ALL', label: `All (${webinars.length})` },
+          { id: 'UPCOMING', label: `Upcoming (${stats.upcoming})` },
+          { id: 'PAST', label: `Completed (${stats.completed})` },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={setStatusFilter}
+      />
 
-        {/* Right Quick Stats Cards inside Banner */}
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(110px, 1fr))',
-            gap: 1.5,
-            width: { xs: '100%', md: 'auto' },
-          }}
-        >
-          <Paper
-            elevation={0}
-            sx={{
-              px: 2.25,
-              py: 1.25,
-              borderRadius: '14px',
-              bgcolor: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: { xs: 'center', md: 'flex-start' },
-              transition: 'transform 0.2s ease',
-              '&:hover': { transform: 'translateY(-2px)', bgcolor: 'rgba(255,255,255,0.09)' }
-            }}
-          >
-            <Typography
-              variant="caption"
-              sx={{
-                fontWeight: 700,
-                color: 'rgba(255,255,255,0.65)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.6px',
-                fontSize: '0.65rem',
-                mb: 0.25
-              }}
-            >
-              Total Enrolled
-            </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#FFFFFF', lineHeight: 1.1 }}>
-              {stats.total}
-            </Typography>
-          </Paper>
-
-          <Paper
-            elevation={0}
-            sx={{
-              px: 2.25,
-              py: 1.25,
-              borderRadius: '14px',
-              bgcolor: 'rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: { xs: 'center', md: 'flex-start' },
-              transition: 'transform 0.2s ease',
-              '&:hover': { transform: 'translateY(-2px)', bgcolor: 'rgba(255,255,255,0.09)' }
-            }}
-          >
-            <Typography
-              variant="caption"
-              sx={{
-                fontWeight: 700,
-                color: '#FDE047',
-                textTransform: 'uppercase',
-                letterSpacing: '0.6px',
-                fontSize: '0.65rem',
-                mb: 0.25
-              }}
-            >
-              Upcoming
-            </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#FDE047', lineHeight: 1.1 }}>
-              {stats.upcoming}
-            </Typography>
-          </Paper>
-
-          <Paper
-            elevation={0}
-            sx={{
-              px: 2.25,
-              py: 1.25,
-              borderRadius: '14px',
-              background: 'linear-gradient(135deg, rgba(242,183,5,0.22) 0%, rgba(242,183,5,0.08) 100%)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(242,183,5,0.35)',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: { xs: 'center', md: 'flex-start' },
-              transition: 'transform 0.2s ease',
-              '&:hover': { transform: 'translateY(-2px)' }
-            }}
-          >
-            <Typography
-              variant="caption"
-              sx={{
-                fontWeight: 700,
-                color: '#FDE047',
-                textTransform: 'uppercase',
-                letterSpacing: '0.6px',
-                fontSize: '0.65rem',
-                mb: 0.25
-              }}
-            >
-              Learning Hours
-            </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: '#FFFFFF', lineHeight: 1.1 }}>
-              {stats.hours}h
-            </Typography>
-          </Paper>
-        </Box>
-      </Box>
-
-      {/* ── Sleek Filter & Search Toolbar ──────────────────────────────────── */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: { xs: 1.5, sm: 1.75 },
-          mb: 2.5,
-          borderRadius: '16px',
-          bgcolor: colors.surface,
-          border: `1px solid ${colors.border}`,
-          boxShadow: '0 4px 20px rgba(15, 23, 42, 0.04)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 2,
-          flexShrink: 0,
-        }}
-      >
-        <Box sx={{ flexGrow: 1, minWidth: { xs: '100%', sm: 280 }, maxWidth: { xs: '100%', sm: 420 } }}>
-          <CustomSearchBar
-            value={search}
-            onChange={(val) => setSearch(val)}
-            placeholder="Search by session title, instructor, or topic..."
-            maxWidth="100%"
-            sx={{ width: '100%' }}
-          />
-        </Box>
-
-        <Box
-          sx={{
-            display: 'flex',
-            gap: 1,
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            width: { xs: '100%', sm: 'auto' },
-            justifyContent: { xs: 'flex-start', sm: 'flex-end' }
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, mr: 0.5, color: colors.textSecondary }}>
-            <FilterListIcon sx={{ fontSize: 18 }} />
-            <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', display: { xs: 'none', md: 'inline' } }}>
-              Filter:
-            </Typography>
-          </Box>
-          {[
-            { id: 'ALL', label: `All (${webinars.length})` },
-            { id: 'UPCOMING', label: `Upcoming (${stats.upcoming})` },
-            { id: 'PAST', label: `Completed (${stats.completed})` },
-          ].map(p => {
-            const active = statusFilter === p.id;
-            return (
-              <Chip
-                key={p.id}
-                label={p.label}
-                size="small"
-                clickable
-                onClick={() => setStatusFilter(p.id)}
-                sx={{
-                  fontWeight: active ? 800 : 600,
-                  fontSize: '0.78rem',
-                  height: 34,
-                  px: 0.8,
-                  borderRadius: '10px',
-                  bgcolor: active ? '#F2B705' : colors.surfaceAlt,
-                  color: active ? '#0F172A' : colors.textSecondary,
-                  border: `1px solid ${active ? '#EAB308' : colors.border}`,
-                  boxShadow: active ? '0 4px 12px rgba(242,183,5,0.28)' : 'none',
-                  transition: 'all 0.2s ease',
-                  '&:hover': {
-                    bgcolor: active ? '#EAB308' : colors.surfaceAlt,
-                    borderColor: active ? '#CA8A04' : colors.textSecondary,
-                  }
-                }}
-              />
-            );
-          })}
-        </Box>
-      </Paper>
 
       {/* ── Scrollable Card Area ───────────────────────────────────────────── */}
       <Box
@@ -446,7 +199,7 @@ export default function RegisteredWebinars() {
       >
         {loading ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 10, gap: 2 }}>
-            <CircularProgress size={42} thickness={4.5} sx={{ color: '#F2B705' }} />
+            <CircularProgress size={42} thickness={4.5} sx={{ color: '#EA580C' }} />
             <Typography variant="body2" sx={{ color: colors.textSecondary, fontWeight: 600 }}>
               Loading your learning schedule...
             </Typography>
@@ -459,8 +212,8 @@ export default function RegisteredWebinars() {
               px: 3,
               textAlign: 'center',
               borderRadius: '20px',
-              bgcolor: colors.surface,
-              border: `1px dashed ${colors.border}`,
+              bgcolor: '#FFF7ED',
+              border: '2px dashed #FED7AA',
               maxWidth: 580,
               mx: 'auto',
               mt: 2
@@ -471,7 +224,7 @@ export default function RegisteredWebinars() {
                 width: 72,
                 height: 72,
                 borderRadius: '50%',
-                bgcolor: 'rgba(242,183,5,0.12)',
+                bgcolor: '#FFEDD5',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -479,12 +232,12 @@ export default function RegisteredWebinars() {
                 mb: 2,
               }}
             >
-              <BookmarkAddedIcon sx={{ fontSize: 36, color: '#D97706' }} />
+              <BookmarkAddedIcon sx={{ fontSize: 36, color: '#EA580C' }} />
             </Box>
-            <Typography variant="h6" sx={{ fontWeight: 800, color: colors.textPrimary, mb: 0.75 }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, color: '#9A3412', mb: 0.75 }}>
               {webinars.length === 0 ? "You haven't registered for any webinars yet" : "No sessions match your filter"}
             </Typography>
-            <Typography variant="body2" sx={{ color: colors.textSecondary, maxWidth: 420, mx: 'auto', mb: 3, lineHeight: 1.6 }}>
+            <Typography variant="body2" sx={{ color: '#C2410C', maxWidth: 420, mx: 'auto', mb: 3, lineHeight: 1.6 }}>
               {webinars.length === 0
                 ? 'Discover live expert sessions on our Upcoming Webinars tab and reserve your seat today!'
                 : 'Try clearing your search query or switching filter tabs to view all your enrolled sessions.'}
@@ -496,15 +249,15 @@ export default function RegisteredWebinars() {
                 endIcon={<ArrowForwardIcon />}
                 onClick={() => navigate('/dashboard/upcoming')}
                 sx={{
-                  bgcolor: '#F2B705',
-                  color: '#0F172A',
+                  bgcolor: '#EA580C',
+                  color: '#FFFFFF',
                   fontWeight: 800,
                   textTransform: 'none',
                   px: 3.5,
                   py: 1.1,
                   borderRadius: '12px',
-                  boxShadow: '0 6px 16px rgba(242,183,5,0.3)',
-                  '&:hover': { bgcolor: '#DDA600', boxShadow: '0 8px 22px rgba(242,183,5,0.4)' }
+                  boxShadow: '0 6px 16px rgba(234, 88, 12, 0.25)',
+                  '&:hover': { bgcolor: '#C2410C' }
                 }}
               >
                 Explore Upcoming Webinars
@@ -515,14 +268,14 @@ export default function RegisteredWebinars() {
                 size="medium"
                 onClick={() => { setSearch(''); setStatusFilter('ALL'); }}
                 sx={{
-                  color: '#0F172A',
-                  borderColor: '#F2B705',
-                  bgcolor: '#F2B705',
+                  color: '#EA580C',
+                  borderColor: '#EA580C',
+                  bgcolor: 'transparent',
                   fontWeight: 700,
                   textTransform: 'none',
                   borderRadius: '10px',
                   px: 3,
-                  '&:hover': { bgcolor: '#DDA600', borderColor: '#DDA600' }
+                  '&:hover': { bgcolor: '#FFF7ED', borderColor: '#C2410C' }
                 }}
               >
                 Reset Filters
@@ -534,302 +287,25 @@ export default function RegisteredWebinars() {
             {filteredWebinars.map((w) => {
               const timing = getWebinarTimingStatus(w.webinarDate, w.startTime);
               const isCompleted = timing.type === 'PAST';
-              const isToday = timing.type === 'TODAY';
 
               return (
-                <Grid item xs={12} md={6} lg={4} key={w.id} sx={{ display: 'flex' }}>
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      width: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      borderRadius: '20px',
-                      bgcolor: colors.surface,
-                      border: isToday
-                        ? '1.5px solid rgba(245, 158, 11, 0.55)'
-                        : `1px solid ${colors.border || 'rgba(15, 23, 42, 0.08)'}`,
-                      background: isToday
-                        ? 'linear-gradient(180deg, #FFFDF5 0%, #FFFFFF 100%)'
-                        : 'linear-gradient(180deg, #FFFFFF 0%, #FAFBFD 100%)',
-                      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                      overflow: 'hidden',
-                      position: 'relative',
-                      boxShadow: isToday
-                        ? '0 10px 28px rgba(245, 158, 11, 0.12)'
-                        : '0 6px 20px rgba(15, 23, 42, 0.05)',
-                      '&:hover': {
-                        transform: 'translateY(-5px)',
-                        boxShadow: '0 20px 38px rgba(15, 23, 42, 0.12)',
-                        borderColor: isCompleted ? colors.border : '#F2B705',
-                      }
-                    }}
-                  >
-                    {/* Top Accent Strip */}
-                    <Box
-                      sx={{
-                        height: 4,
-                        width: '100%',
-                        background: isToday
-                          ? 'linear-gradient(90deg, #F59E0B 0%, #FDE047 100%)'
-                          : isCompleted
-                          ? '#CBD5E1'
-                          : 'linear-gradient(90deg, #1E293B 0%, #3B82F6 100%)',
-                      }}
-                    />
-
-                    {/* Card Header Bar */}
-                    <Box
-                      sx={{
-                        px: 2.5,
-                        py: 1.5,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 1,
-                        bgcolor: isToday ? 'rgba(254, 243, 199, 0.55)' : colors.surfaceAlt,
-                        borderBottom: `1px solid ${colors.border || 'rgba(15,23,42,0.06)'}`,
-                      }}
-                    >
-                      <Chip
-                        label={w.categoryName || 'General'}
-                        size="small"
-                        sx={{
-                          fontWeight: 700,
-                          fontSize: '0.72rem',
-                          height: 25,
-                          borderRadius: '8px',
-                          bgcolor: 'rgba(15, 23, 42, 0.07)',
-                          color: colors.primary || '#0F172A',
-                          maxWidth: '55%',
-                        }}
-                      />
-
-                      <Chip
-                        label={timing.label}
-                        size="small"
-                        sx={{
-                          fontWeight: 800,
-                          fontSize: '0.72rem',
-                          height: 25,
-                          borderRadius: '8px',
-                          bgcolor: isToday ? '#FEF3C7' : (isCompleted ? '#F1F5F9' : '#EFF6FF'),
-                          color: isToday ? '#B45309' : (isCompleted ? '#64748B' : '#1D4ED8'),
-                          border: `1px solid ${isToday ? '#F59E0B' : (isCompleted ? '#CBD5E1' : '#BFDBFE')}`,
-                        }}
-                      />
-                    </Box>
-
-                    {/* Card Body Content */}
-                    <Box
-                      sx={{
-                        p: 2.5,
-                        flex: 1,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-                      {/* Top Content Group */}
-                      <Box>
-                        {/* Registered Date Tag */}
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1.25 }}>
-                          <CheckCircleIcon sx={{ color: '#16A34A', fontSize: 16 }} />
-                          <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 600, fontSize: '0.74rem' }}>
-                            Enrolled on {formatDate(w.registeredAt || w.createdAt)}
-                          </Typography>
-                        </Box>
-
-                        {/* Webinar Title (Fixed 2-line height for strict card alignment) */}
-                        <Typography
-                          variant="subtitle1"
-                          title={w.webinarName}
-                          sx={{
-                            fontWeight: 700,
-                            color: colors.textPrimary,
-                            mb: 2,
-                            lineHeight: 1.35,
-                            fontSize: '1.15rem',
-                            letterSpacing: '-0.25px',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                            minHeight: '2.7em',
-                          }}
-                        >
-                          {w.webinarName}
-                        </Typography>
-
-                        {/* Conductor Profile Pill */}
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1.5,
-                            mb: 2,
-                            p: 1.25,
-                            borderRadius: '12px',
-                            bgcolor: 'rgba(15, 23, 42, 0.025)',
-                            border: '1px solid rgba(15, 23, 42, 0.05)',
-                          }}
-                        >
-                          <Avatar
-                            sx={{
-                              width: 40,
-                              height: 40,
-                              bgcolor: '#1E293B',
-                              color: '#FDE047',
-                              fontSize: '0.95rem',
-                              fontWeight: 800,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {w.conductorName?.charAt(0)?.toUpperCase() || 'S'}
-                          </Avatar>
-                          <Box sx={{ minWidth: 0, flex: 1 }}>
-                            <Typography
-                              variant="body2"
-                              noWrap
-                              sx={{ fontWeight: 700, color: colors.textPrimary, fontSize: '0.86rem', lineHeight: 1.2 }}
-                            >
-                              {w.conductorName}
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              noWrap
-                              sx={{ color: colors.textSecondary, fontSize: '0.72rem', display: 'block' }}
-                            >
-                              Session Instructor
-                            </Typography>
-                          </Box>
-                        </Box>
-
-                        {/* Schedule Ticket Block */}
-                        <Box
-                          sx={{
-                            bgcolor: '#F8FAFC',
-                            p: 1.5,
-                            borderRadius: '12px',
-                            border: '1px solid #E2E8F0',
-                            mb: 2.5,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 0.75,
-                          }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <CalendarMonthIcon sx={{ fontSize: 17, color: '#0F172A', opacity: 0.75 }} />
-                            <Typography variant="body2" sx={{ fontWeight: 700, color: colors.textPrimary, fontSize: '0.84rem' }}>
-                              {formatDate(w.webinarDate)}
-                            </Typography>
-                          </Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <AccessTimeIcon sx={{ fontSize: 17, color: '#D97706' }} />
-                            <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 600, fontSize: '0.78rem' }}>
-                              {formatTime(w.startTime)} – {formatTime(w.endTime)} • {fmtDuration(w.durationMinutes)}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </Box>
-
-                      {/* Bottom Action Bar (Uniformly Aligned Across All Cards) */}
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', pt: 0.5 }}>
-                        {isCompleted ? (
-                          <Button
-                            fullWidth
-                            variant="outlined"
-                            onClick={() => setJoinModalWebinar(w)}
-                            sx={{
-                              height: 40,
-                              fontWeight: 700,
-                              fontSize: '0.82rem',
-                              textTransform: 'none',
-                              borderRadius: '10px',
-                              borderColor: '#CBD5E1',
-                              color: colors.textSecondary,
-                              '&:hover': {
-                                borderColor: colors.textPrimary,
-                                color: colors.textPrimary,
-                                bgcolor: 'rgba(15, 23, 42, 0.03)'
-                              }
-                            }}
-                          >
-                            Session Details
-                          </Button>
-                        ) : (
-                          <Button
-                            fullWidth
-                            variant="contained"
-                            startIcon={<VideoCameraFrontIcon sx={{ fontSize: '18px !important' }} />}
-                            onClick={() => setJoinModalWebinar(w)}
-                            sx={{
-                              height: 40,
-                              fontWeight: 800,
-                              fontSize: '0.84rem',
-                              bgcolor: '#F2B705',
-                              color: '#0F172A',
-                              textTransform: 'none',
-                              borderRadius: '10px',
-                              boxShadow: '0 4px 12px rgba(242, 183, 5, 0.25)',
-                              '&:hover': {
-                                bgcolor: '#EAB308',
-                                boxShadow: '0 6px 16px rgba(242, 183, 5, 0.4)'
-                              }
-                            }}
-                          >
-                            Join Webinar
-                          </Button>
-                        )}
-
-                        <Tooltip title="Add to Google Calendar" arrow>
-                          <IconButton
-                            onClick={() => handleAddToCalendar(w)}
-                            sx={{
-                              width: 40,
-                              height: 40,
-                              borderRadius: '10px',
-                              bgcolor: '#F1F5F9',
-                              border: '1px solid #E2E8F0',
-                              color: '#475569',
-                              flexShrink: 0,
-                              transition: 'all 0.2s',
-                              '&:hover': {
-                                color: '#0F172A',
-                                bgcolor: '#FEF08A',
-                                borderColor: '#FACC15'
-                              }
-                            }}
-                          >
-                            <EventIcon sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>
-
-                        <Tooltip title="Copy Share Link" arrow>
-                          <IconButton
-                            onClick={(e) => handleCopyLink(w.shareId, e)}
-                            sx={{
-                              width: 40,
-                              height: 40,
-                              borderRadius: '10px',
-                              bgcolor: '#F1F5F9',
-                              border: '1px solid #E2E8F0',
-                              color: '#475569',
-                              flexShrink: 0,
-                              transition: 'all 0.2s',
-                              '&:hover': {
-                                color: '#0F172A',
-                                bgcolor: '#FEF08A',
-                                borderColor: '#FACC15'
-                              }
-                            }}
-                          >
-                            <ShareIcon sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </Box>
-                  </Paper>
+                <Grid item xs={12} lg={6} key={w.id} sx={{ display: 'flex' }}>
+                  <CardComponent
+                    webinar={w}
+                    type="registered"
+                    statusLabel={isCompleted ? 'Completed' : timing.label}
+                    price={w.isPaid ? (w.price ? `$${w.price}` : 'Paid') : 'Free'}
+                    primaryLabel={isCompleted ? 'Session Details' : 'Join Webinar'}
+                    onPrimaryClick={() => setJoinModalWebinar(w)}
+                    secondaryLabel="Details"
+                    onSecondaryClick={() => setJoinModalWebinar(w)}
+                    onCalendarClick={() => handleAddToCalendar(w)}
+                    onShareClick={
+                      isWebinarStartTimePast(w.startTime)
+                        ? undefined
+                        : (e) => handleCopyLink(w.shareId, e)
+                    }
+                  />
                 </Grid>
               );
             })}
@@ -1017,14 +493,14 @@ export default function RegisteredWebinars() {
                 window.open(`${window.location.origin}/register?trackingId=${joinModalWebinar.shareId}`, '_blank');
               }}
               sx={{
-                bgcolor: '#F2B705',
-                color: '#0F172A',
+                bgcolor: '#EA580C',
+                color: '#FFFFFF',
                 fontWeight: 700,
                 textTransform: 'none',
                 px: 2.5,
                 borderRadius: '10px',
-                boxShadow: '0 6px 16px rgba(242,183,5,0.3)',
-                '&:hover': { bgcolor: '#DDA600', boxShadow: '0 8px 20px rgba(242,183,5,0.4)' }
+                boxShadow: '0 6px 16px rgba(234, 88, 12, 0.28)',
+                '&:hover': { bgcolor: '#C2410C', boxShadow: '0 8px 20px rgba(234, 88, 12, 0.38)' }
               }}
             >
               Enter Meeting Room

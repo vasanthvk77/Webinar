@@ -236,6 +236,122 @@ END
 GO
 
 -- =============================================
+-- Migration Guards: Add Gender and ProfileUrl to wms.Users
+-- =============================================
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Users' AND s.name = 'wms' AND c.name = 'Gender'
+)
+BEGIN
+    ALTER TABLE wms.Users ADD Gender TINYINT NULL;
+    PRINT 'Column Gender added to wms.Users';
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Users' AND s.name = 'wms' AND c.name = 'ProfileUrl'
+)
+BEGIN
+    ALTER TABLE wms.Users ADD ProfileUrl NVARCHAR(500) NULL;
+    PRINT 'Column ProfileUrl added to wms.Users';
+END
+GO
+
+-- =============================================
+-- SP: wms.sp_GetStudentProfile
+-- Purpose : Retrieve full student profile details for display
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_GetStudentProfile' AND s.name = 'wms')
+    DROP PROCEDURE wms.sp_GetStudentProfile;
+GO
+
+CREATE PROCEDURE wms.sp_GetStudentProfile
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM wms.Users WHERE Id = @UserId AND IsActive = 1)
+    BEGIN
+        RAISERROR('User does not exist or has been deactivated.', 16, 1);
+        RETURN;
+    END
+
+    SELECT
+        u.Id,
+        u.FirstName,
+        u.LastName,
+        u.Email,
+        u.MobileNumber,
+        ISNULL(u.CountryCode, '') AS CountryCode,
+        ISNULL(u.Gender, 0) AS Gender,
+        CASE u.Gender
+            WHEN 1 THEN 'Male'
+            WHEN 2 THEN 'Female'
+            WHEN 3 THEN 'Others'
+            ELSE 'Not Specified'
+        END AS GenderName,
+        u.ProfileUrl,
+        r.Name AS RoleName,
+        u.CreatedAt,
+        u.UpdatedAt
+    FROM wms.Users u
+    JOIN wms.Roles r ON r.Id = u.RoleId
+    WHERE u.Id = @UserId;
+END
+GO
+
+-- =============================================
+-- SP: wms.sp_UpdateStudentProfile
+-- Purpose : Updates profile data (FirstName, LastName, MobileNumber, CountryCode, Gender, ProfileUrl)
+--           Email is strictly protected and cannot be changed here.
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_UpdateStudentProfile' AND s.name = 'wms')
+    DROP PROCEDURE wms.sp_UpdateStudentProfile;
+GO
+
+CREATE PROCEDURE wms.sp_UpdateStudentProfile
+    @UserId       INT,
+    @FirstName    NVARCHAR(100),
+    @LastName     NVARCHAR(100) = NULL,
+    @MobileNumber NVARCHAR(20)  = NULL,
+    @CountryCode  VARCHAR(10)   = NULL,
+    @Gender       TINYINT       = NULL,
+    @ProfileUrl   NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM wms.Users WHERE Id = @UserId AND IsActive = 1)
+    BEGIN
+        RAISERROR('User does not exist or has been deactivated.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE wms.Users
+    SET
+        FirstName    = ISNULL(@FirstName, FirstName),
+        LastName     = @LastName,
+        MobileNumber = @MobileNumber,
+        CountryCode  = @CountryCode,
+        Gender       = @Gender,
+        ProfileUrl   = COALESCE(@ProfileUrl, ProfileUrl),
+        UpdatedAt    = GETUTCDATE()
+    WHERE Id = @UserId;
+
+    -- Return updated profile directly
+    EXEC wms.sp_GetStudentProfile @UserId = @UserId;
+END
+GO
+
+-- =============================================
 -- SP: wms.usp_LoginUser  (already exists — replace with extended version)
 -- Purpose : Fetch user + role by email for login.
 --           Includes PasswordHash for bcrypt verify.
@@ -356,5 +472,121 @@ BEGIN
     FROM wms.Users u
     JOIN wms.Roles r ON r.Id = u.RoleId
     WHERE u.Id = @NewId;
+END
+GO
+
+-- =============================================
+-- Migration Guards: Add Gender and ProfileUrl to wms.Users
+-- =============================================
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Users' AND s.name = 'wms' AND c.name = 'Gender'
+)
+BEGIN
+    ALTER TABLE wms.Users ADD Gender TINYINT NULL;
+    PRINT 'Column Gender added to wms.Users';
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Users' AND s.name = 'wms' AND c.name = 'ProfileUrl'
+)
+BEGIN
+    ALTER TABLE wms.Users ADD ProfileUrl NVARCHAR(500) NULL;
+    PRINT 'Column ProfileUrl added to wms.Users';
+END
+GO
+
+-- =============================================
+-- SP: wms.sp_GetStudentProfile
+-- Purpose : Retrieve full student profile details for display
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_GetStudentProfile' AND s.name = 'wms')
+    DROP PROCEDURE wms.sp_GetStudentProfile;
+GO
+
+CREATE PROCEDURE wms.sp_GetStudentProfile
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM wms.Users WHERE Id = @UserId AND IsActive = 1)
+    BEGIN
+        RAISERROR('User does not exist or has been deactivated.', 16, 1);
+        RETURN;
+    END
+
+    SELECT
+        u.Id,
+        u.FirstName,
+        u.LastName,
+        u.Email,
+        u.MobileNumber,
+        ISNULL(u.CountryCode, '') AS CountryCode,
+        ISNULL(u.Gender, 0) AS Gender,
+        CASE u.Gender
+            WHEN 1 THEN 'Male'
+            WHEN 2 THEN 'Female'
+            WHEN 3 THEN 'Others'
+            ELSE 'Not Specified'
+        END AS GenderName,
+        u.ProfileUrl,
+        r.Name AS RoleName,
+        u.CreatedAt,
+        u.UpdatedAt
+    FROM wms.Users u
+    JOIN wms.Roles r ON r.Id = u.RoleId
+    WHERE u.Id = @UserId;
+END
+GO
+
+-- =============================================
+-- SP: wms.sp_UpdateStudentProfile
+-- Purpose : Updates profile data (FirstName, LastName, MobileNumber, CountryCode, Gender, ProfileUrl)
+--           Email is strictly protected and cannot be changed here.
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_UpdateStudentProfile' AND s.name = 'wms')
+    DROP PROCEDURE wms.sp_UpdateStudentProfile;
+GO
+
+CREATE PROCEDURE wms.sp_UpdateStudentProfile
+    @UserId       INT,
+    @FirstName    NVARCHAR(100),
+    @LastName     NVARCHAR(100) = NULL,
+    @MobileNumber NVARCHAR(20)  = NULL,
+    @CountryCode  VARCHAR(10)   = NULL,
+    @Gender       TINYINT       = NULL,
+    @ProfileUrl   NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM wms.Users WHERE Id = @UserId AND IsActive = 1)
+    BEGIN
+        RAISERROR('User does not exist or has been deactivated.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE wms.Users
+    SET
+        FirstName    = ISNULL(@FirstName, FirstName),
+        LastName     = @LastName,
+        MobileNumber = @MobileNumber,
+        CountryCode  = @CountryCode,
+        Gender       = @Gender,
+        ProfileUrl   = COALESCE(@ProfileUrl, ProfileUrl),
+        UpdatedAt    = GETUTCDATE()
+    WHERE Id = @UserId;
+
+    -- Return updated profile directly
+    EXEC wms.sp_GetStudentProfile @UserId = @UserId;
 END
 GO

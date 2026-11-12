@@ -115,6 +115,27 @@ public class WebinarsController : ControllerBase
     }
 
     // -------------------------------------------------------
+    // GET /api/webinars/payments — Webinar Payments & Revenue
+    // Calls: wms.GetPayments (Per-webinar revenue & total revenue)
+    // -------------------------------------------------------
+    [HttpGet("payments")]
+    public async Task<IActionResult> GetPayments()
+    {
+        _logger.LogInformation("[WebinarsController] GET /api/webinars/payments — CallerUserId: {UserId}, RoleId: {RoleId}",
+            CallerUserId, CallerRoleId);
+
+        if (CallerRoleId != 1 && CallerRoleId != 2)
+        {
+            _logger.LogWarning("[WebinarsController] GetPayments FORBIDDEN — CallerUserId: {UserId}, RoleId: {RoleId}",
+                CallerUserId, CallerRoleId);
+            return Forbid();
+        }
+
+        var payments = await _webinarService.GetPaymentsAsync();
+        return Ok(new { success = true, data = payments });
+    }
+
+    // -------------------------------------------------------
     // GET /api/webinars/{id}/certificate/download — Condition 3: Certificate Download
     // Strict Verification: Checks if student is eligible for certificate before streaming PDF
     // -------------------------------------------------------
@@ -223,6 +244,39 @@ public class WebinarsController : ControllerBase
     }
 
     // -------------------------------------------------------
+    // POST /api/webinars/upload-image — Super Admin & Admin
+    // -------------------------------------------------------
+    [HttpPost("upload-image")]
+    public async Task<IActionResult> UploadImage([FromForm] IFormFile file, [FromQuery] string? existingUrl = null)
+    {
+        _logger.LogInformation("[WebinarsController] UploadImage called — CallerUserId: {UserId}", CallerUserId);
+
+        if (CallerRoleId != 1 && CallerRoleId != 2)
+        {
+            _logger.LogWarning("[WebinarsController] UploadImage FORBIDDEN — CallerUserId: {UserId}", CallerUserId);
+            return Forbid();
+        }
+
+        if (file == null || file.Length == 0)
+            return BadRequest(new { success = false, message = "No image file uploaded." });
+
+        try
+        {
+            var url = await _webinarService.UploadWebinarImageAsync(file, existingUrl);
+            return Ok(new { success = true, url });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[WebinarsController] UploadImage failed: {Message}", ex.Message);
+            return StatusCode(500, new { success = false, message = "Failed to upload image." });
+        }
+    }
+
+    // -------------------------------------------------------
     // DELETE /api/webinars/{id} — Super Admin only
     // -------------------------------------------------------
     [HttpDelete("{id:long}")]
@@ -271,6 +325,32 @@ public class WebinarsController : ControllerBase
     }
 
     // -------------------------------------------------------
+    // POST /api/webinars/hold-seat — Atomically reserve a seat for 5 mins (BookMyShow pattern)
+    // -------------------------------------------------------
+    [HttpPost("hold-seat")]
+    [AllowAnonymous]
+    public async Task<IActionResult> HoldSeat([FromBody] HoldSeatRequest request)
+    {
+        int targetUserId = CallerUserId > 0 ? CallerUserId : (request.UserId ?? 0);
+        _logger.LogInformation("[WebinarsController] POST /api/webinars/hold-seat — TargetUserId: {UserId}, TrackingId: {TrackingId}", targetUserId, request.TrackingId);
+
+        if (string.IsNullOrWhiteSpace(request.TrackingId))
+            return BadRequest(new { success = false, message = "Tracking ID is required." });
+
+        var result = await _webinarService.HoldSeatAsync(request.TrackingId, targetUserId);
+
+        if (!result.Success)
+        {
+            if (result.IsCapacityFull)
+                return StatusCode(409, new { success = false, message = result.Message, isCapacityFull = true });
+
+            return BadRequest(new { success = false, message = result.Message });
+        }
+
+        return Ok(new { success = true, data = result });
+    }
+
+    // -------------------------------------------------------
     // POST /api/webinars/register-tracking — Authenticated user registers for a webinar
     // -------------------------------------------------------
     [HttpPost("register-tracking")]
@@ -283,7 +363,7 @@ public class WebinarsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.TrackingId))
             return BadRequest(new { success = false, message = "Tracking ID is required" });
 
-        var (success, message, webinarName) = await _webinarService.RegisterTrackingAsync(request.TrackingId, targetUserId);
+        var (success, message, webinarName) = await _webinarService.RegisterTrackingAsync(request.TrackingId, targetUserId, request.HoldToken);
 
         if (!success)
             return BadRequest(new { success = false, message, webinarName });

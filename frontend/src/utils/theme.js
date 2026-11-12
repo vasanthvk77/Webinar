@@ -73,6 +73,12 @@ export const lightColors = {
   scrollThumbHov: '#CBD5E1',
   shadowSm:       'rgba(0,0,0,0.06)',
   shadowMd:       'rgba(0,0,0,0.12)',
+
+  // ── Profile / Aura Banner (Matches App Brand Theme) ──────────────
+  bannerBg:        'radial-gradient(ellipse at 85% 20%, rgba(234, 179, 8, 0.22) 0%, rgba(104, 105, 255, 0.18) 38%, rgba(30, 41, 59, 0.04) 75%, transparent 100%), linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 50%, #FEF9C3 100%)',
+  bannerSparkle:   '#EAB308',
+  bannerBadgeText: '#1E293B',
+  bannerBorder:    'rgba(234, 179, 8, 0.25)',
 };
 
 export const darkColors = {
@@ -141,6 +147,28 @@ export const darkColors = {
   scrollThumbHov: '#2D324A',
   shadowSm:       'rgba(0,0,0,0.3)',
   shadowMd:       'rgba(0,0,0,0.5)',
+
+  // ── Profile / Aura Banner (Matches App Brand Theme) ──────────────
+  bannerBg:        'radial-gradient(ellipse at 85% 15%, rgba(234, 179, 8, 0.22) 0%, rgba(104, 105, 255, 0.26) 42%, rgba(14, 16, 23, 0.95) 100%), linear-gradient(135deg, #0E1017 0%, #161822 55%, #1E2230 100%)',
+  bannerSparkle:   '#EAB308',
+  bannerBadgeText: '#F1F5F9',
+  bannerBorder:    'rgba(234, 179, 8, 0.2)',
+};
+
+// Global Aura Banner Theme Preset
+export const BANNER_THEME = {
+  light: {
+    bg: lightColors.bannerBg,
+    sparkle: lightColors.bannerSparkle,
+    badgeText: lightColors.bannerBadgeText,
+    border: lightColors.bannerBorder,
+  },
+  dark: {
+    bg: darkColors.bannerBg,
+    sparkle: darkColors.bannerSparkle,
+    badgeText: darkColors.bannerBadgeText,
+    border: darkColors.bannerBorder,
+  },
 };
 
 // ================================================================
@@ -183,7 +211,7 @@ export function buildMuiTheme(mode = 'light') {
     },
 
     typography: {
-      fontFamily: '"Inter", "Roboto", sans-serif',
+      fontFamily: '"Google Sans", "Product Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       allVariants: { color: c.textPrimary },
     },
 
@@ -286,6 +314,32 @@ export function buildMuiTheme(mode = 'light') {
     },
   });
 }
+
+// ── Centralized Dashboard Chart Pillars Palette (Super Admin, Admin, Student) ──
+export const CHART_PILLARS = {
+  // Pillar 1: Total Registration / Scheduled Time (Gold / Amber)
+  primary: {
+    main: '#F59E0B',
+    dark: '#D97706',
+    gradient: 'linear-gradient(180deg, #F59E0B 0%, #D97706 100%)',
+    emptyGradient: 'repeating-linear-gradient(135deg, #FEF3C7 0 4px, #fffbeb 4px 8px)',
+    shadow: '0 8px 18px -8px rgba(245, 158, 11, 0.7)',
+    pillBg: '#FEF3C7',
+    pillText: '#B45309',
+  },
+  // Pillar 2: Completed Webinar / Attended Time (#6869ff - Royal Indigo)
+  secondary: {
+    main: '#6869ff',
+    dark: '#4f46e5',
+    gradient: 'linear-gradient(180deg, #6869ff 0%, #4f46e5 100%)',
+    emptyGradient: 'repeating-linear-gradient(135deg, #EEF2FF 0 4px, #F5F7FF 4px 8px)',
+    shadow: '0 8px 18px -8px rgba(104, 105, 255, 0.65)',
+    pillBg: '#EEF2FF',
+    pillText: '#4338CA',
+    pillBorder: 'rgba(104, 105, 255, 0.25)',
+  },
+  referenceLine: '#EAB308',
+};
 
 // ── Legacy default export (for any leftover static imports) ──────
 // Will be replaced by the dynamic theme from ThemeContext.

@@ -216,3 +216,36 @@ export const formatUtcToLocalDateInput = (utcDateStr) => {
     return '';
   }
 };
+
+/**
+ * Convert UTC timestamp string from database/backend into a native JavaScript Date object
+ * accurately parsed in the user's browser local timezone.
+ * Handles strings with or without 'Z' suffix to guarantee UTC parsing.
+ */
+export const parseUtcToBrowserDate = (utcDateStr) => {
+  if (!utcDateStr) return null;
+  if (utcDateStr instanceof Date) return utcDateStr;
+  try {
+    let str = String(utcDateStr).trim();
+    if (str.includes(' ') && !str.includes('T')) {
+      str = str.replace(' ', 'T');
+    }
+    if (!str.endsWith('Z') && !str.includes('+') && !/-\d{2}:\d{2}$/.test(str)) {
+      str = `${str}Z`;
+    }
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Returns true if the webinar UTC start time has already passed in browser local time (StartTime < Current)
+ */
+export const isWebinarStartTimePast = (utcStartTimeStr) => {
+  const browserDate = parseUtcToBrowserDate(utcStartTimeStr);
+  if (!browserDate) return false;
+  return browserDate.getTime() <= Date.now();
+};
+

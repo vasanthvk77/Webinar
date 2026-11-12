@@ -36,6 +36,7 @@ Log.Information("=== Webinar API Backend Starting ===");
 // -------------------------------------------------------
 SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
 SqlMapper.AddTypeHandler(new TimeOnlyTypeHandler());
+SqlMapper.AddTypeHandler(new DateTimeUtcTypeHandler());
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog();
@@ -102,6 +103,7 @@ builder.Services.AddScoped<IMeetingService,    MeetingService>();
 builder.Services.AddScoped<CertificateService>();
 builder.Services.AddScoped<ICertificateTemplateService, CertificateTemplateService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<IStudentProfileService, StudentProfileService>();
 
 builder.Services.AddSignalR();
 builder.Services.AddHttpClient("BbbClient")
@@ -184,6 +186,45 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("FrontendPolicy");
+
+// -------------------------------------------------------
+// Serve StudentProfileImages from Root -> Images -> StudentProfileImages
+// -------------------------------------------------------
+var rootDir = Directory.GetParent(app.Environment.ContentRootPath)?.FullName ?? app.Environment.ContentRootPath;
+var studentProfileDir = Path.Combine(rootDir, "Images", "StudentProfileImages");
+if (!Directory.Exists(studentProfileDir))
+{
+    Directory.CreateDirectory(studentProfileDir);
+}
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(studentProfileDir),
+    RequestPath = "/Images/StudentProfileImages"
+});
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(studentProfileDir),
+    RequestPath = "/StudentProfileImages"
+});
+
+// -------------------------------------------------------
+// Serve WebinarImages from Root -> Images -> WebinarImages
+// -------------------------------------------------------
+var webinarImagesDir = Path.Combine(rootDir, "Images", "WebinarImages");
+if (!Directory.Exists(webinarImagesDir))
+{
+    Directory.CreateDirectory(webinarImagesDir);
+}
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webinarImagesDir),
+    RequestPath = "/Images/WebinarImages"
+});
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webinarImagesDir),
+    RequestPath = "/WebinarImages"
+});
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

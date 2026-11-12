@@ -30,7 +30,7 @@ const SUPER_ADMIN_ROUTES = [
 ];
 
 const STUDENT_ROUTES = [
-  '/dashboard', '/dashboard/profile', '/dashboard/upcoming',
+  '/dashboard', '/dashboard/profile', '/dashboard/webinars', '/dashboard/upcoming',
   '/dashboard/registered', '/dashboard/completed', '/dashboard/certificates',
   '/dashboard/recordings', '/dashboard/payments', '/dashboard/notifications',
 ];
@@ -47,12 +47,13 @@ function getHomeRoute(roleId) {
 // ─────────────────────────────────────────────────────────
 function toMinimalUser(userData) {
   return {
-    id:        userData.id,
-    firstName: userData.firstName,
-    lastName:  userData.lastName,
-    email:     userData.email,
-    roleId:    userData.roleId,
-    roleName:  userData.roleName,
+    id:          userData.id,
+    firstName:   userData.firstName,
+    lastName:    userData.lastName,
+    email:       userData.email,
+    roleId:      userData.roleId,
+    roleName:    userData.roleName,
+    countryCode: userData.countryCode,
   };
 }
 

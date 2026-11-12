@@ -109,13 +109,11 @@ GO
 INSERT INTO wms.Tabs (TabName, Route, DisplayOrder, RoleId) VALUES
 ('Dashboard',           '/dashboard',               1,  3),
 ('My Profile',          '/dashboard/profile',       2,  3),
-('Upcoming Webinars',   '/dashboard/upcoming',      3,  3),
-('Registered Webinars', '/dashboard/registered',    4,  3),
-('Completed Webinars',  '/dashboard/completed',     5,  3),
-('My Certificates',     '/dashboard/certificates',  6,  3),
-('Webinar Recordings',  '/dashboard/recordings',    7,  3),
-('Payments',            '/dashboard/payments',      8,  3),
-('Notifications',       '/dashboard/notifications', 9,  3);
+('Webinars',            '/dashboard/webinars',      3,  3),
+('My Certificates',     '/dashboard/certificates',  4,  3),
+('Webinar Recordings',  '/dashboard/recordings',    5,  3),
+('Payments',            '/dashboard/payments',      6,  3),
+('Notifications',       '/dashboard/notifications', 7,  3);
 
 -- Admin tabs — permission-controlled (no Dashboard, no removed modules)
 INSERT INTO wms.Tabs (TabName, Route, DisplayOrder, RoleId) VALUES
