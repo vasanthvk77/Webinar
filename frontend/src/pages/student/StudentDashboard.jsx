@@ -22,6 +22,7 @@ import SchoolIcon from '@mui/icons-material/School';
 import ShareIcon from '@mui/icons-material/Share';
 import EventIcon from '@mui/icons-material/Event';
 import DownloadIcon from '@mui/icons-material/Download';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import toast from 'react-hot-toast';
 
 import { dashboardService } from '../../services/api';
@@ -32,6 +33,7 @@ import {
   formatUtcToLocalTimeOnly,
   isWebinarStartTimePast
 } from '../../utils/validation';
+import { getCurrencySymbolFromCountryCode } from '../../utils/countryUtils';
 
 // ── Brand Palette ────────────────────────────────────────────
 const GOLD = '#eab308';
@@ -52,9 +54,10 @@ const fmtDuration = (seconds) => {
 };
 
 // ── Executive Stat Tile Component (Unified Amber/Gold Look matching Admin) ──
-function StatTile({ icon, label, value, sub, loading, colors }) {
+function StatTile({ icon, label, value, sub, loading, colors, onClick }) {
   return (
     <Box
+      onClick={onClick}
       sx={{
         position: 'relative',
         display: 'flex',
@@ -66,6 +69,7 @@ function StatTile({ icon, label, value, sub, loading, colors }) {
         bgcolor: colors.surface,
         border: `1px solid ${colors.border}`,
         boxShadow: '0 1px 3px rgba(15,23,42,0.03), 0 8px 20px -14px rgba(15,23,42,0.08)',
+        cursor: onClick ? 'pointer' : 'default',
         transition: 'all 0.22s ease',
         '&:hover': {
           transform: 'translateY(-2px)',
@@ -160,6 +164,15 @@ export default function StudentDashboard() {
   }, [loadData]);
 
   // Derived metrics
+  const currencySymbol = useMemo(() => {
+    return getCurrencySymbolFromCountryCode(data?.summary?.countryCode || user?.countryCode || '+91');
+  }, [data?.summary?.countryCode, user?.countryCode]);
+
+  const formatCurrency = (amount) => {
+    const num = Number(amount || 0);
+    return `${currencySymbol}${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
   const completionRate = useMemo(() => {
     const total = data.summary?.totalRegistrations || 0;
     const completed = data.summary?.completedWebinars || 0;
@@ -660,7 +673,7 @@ export default function StudentDashboard() {
         );
       })() : null}
 
-      {/* ── 5 Professional Executive KPI Stat Tiles (Unified Amber/Gold) ── */}
+      {/* ── 6 Professional Executive KPI Stat Tiles (Unified Amber/Gold) ── */}
       <Box
         sx={{
           display: 'grid',
@@ -668,7 +681,7 @@ export default function StudentDashboard() {
             xs: 'repeat(1, 1fr)',
             sm: 'repeat(2, 1fr)',
             md: 'repeat(3, 1fr)',
-            lg: 'repeat(5, 1fr)'
+            lg: 'repeat(6, 1fr)'
           },
           gap: 2,
           mb: 3
@@ -681,6 +694,17 @@ export default function StudentDashboard() {
           sub={`${data.summary.freeRegistrations} Free • ${data.summary.paidRegistrations} Paid`}
           loading={loading}
           colors={colors}
+          onClick={() => navigate('/dashboard/webinars?tab=registered')}
+        />
+
+        <StatTile
+          icon={<AccountBalanceWalletIcon sx={{ fontSize: 20 }} />}
+          label="Paid Amount"
+          value={formatCurrency(data.summary.totalAmountPaid)}
+          sub={`Across ${data.summary.paidRegistrations || 0} paid session${data.summary.paidRegistrations === 1 ? '' : 's'}`}
+          loading={loading}
+          colors={colors}
+          onClick={() => navigate('/dashboard/payments')}
         />
 
         <StatTile
@@ -690,6 +714,7 @@ export default function StudentDashboard() {
           sub={`${completionRate}% Completed • ${data.summary.upcomingWebinars} Pending`}
           loading={loading}
           colors={colors}
+          onClick={() => navigate('/dashboard/webinars?tab=completed')}
         />
 
         <StatTile
@@ -699,6 +724,7 @@ export default function StudentDashboard() {
           sub="Verified & Downloadable"
           loading={loading}
           colors={colors}
+          onClick={() => navigate('/dashboard/certificates')}
         />
 
         <StatTile

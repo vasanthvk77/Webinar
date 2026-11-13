@@ -206,6 +206,8 @@ BEGIN
         COUNT(wr.Id) AS TotalRegistrations,
         ISNULL(SUM(CASE WHEN w.IsPaid = 0 THEN 1 ELSE 0 END), 0) AS FreeRegistrations,
         ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN 1 ELSE 0 END), 0) AS PaidRegistrations,
+        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmountPaid,
+        ISNULL((SELECT TOP 1 CountryCode FROM wms.Users WHERE Id = @StudentId), '+91') AS CountryCode,
         ISNULL(SUM(CASE WHEN wc.IsAttended = 1 THEN 1 ELSE 0 END), 0) AS CompletedWebinars,
         ISNULL(SUM(CASE WHEN w.IsCompleted = 0 AND w.EndTime >= SYSUTCDATETIME() AND (wc.IsAttended IS NULL OR wc.IsAttended = 0) THEN 1 ELSE 0 END), 0) AS UpcomingWebinars,
         ISNULL(SUM(CASE WHEN wc.IsCertificateEligible = 1 THEN 1 ELSE 0 END), 0) AS CertificatesCount,

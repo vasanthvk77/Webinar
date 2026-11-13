@@ -281,3 +281,38 @@ public class PaymentsSummaryDto
     public IEnumerable<WebinarPaymentDto> Webinars               { get; set; } = new List<WebinarPaymentDto>();
 }
 
+// -------------------------------------------------------
+// DTO: Student Payment Details (from wms.sp_StudentPaymentDetails)
+// -------------------------------------------------------
+public class StudentPaymentItemDto
+{
+    public long      WebinarId       { get; set; }
+    public string    WebinarName     { get; set; } = string.Empty;
+    public int       CategoryId      { get; set; }
+    public string?   CategoryName    { get; set; }
+    public string?   ConductorName   { get; set; }
+    public DateTime  WebinarDate     { get; set; }
+    public DateTime  StartTime       { get; set; }
+    public DateTime  EndTime         { get; set; }
+    public int       DurationMinutes { get; set; }
+    public bool      IsPaid          { get; set; }
+    public double    Price           { get; set; }
+    public double    AmountPaid      { get; set; }
+    public int       ParticipantLimit{ get; set; }
+    public string?   ShareId         { get; set; }
+    public string?   ImageUrl        { get; set; }
+    public bool      IsCompleted     { get; set; }
+    public DateTime  RegisteredAt    { get; set; }
+}
+
+public class StudentPaymentsSummaryDto
+{
+    public int                                UserId            { get; set; }
+    public string                             CountryCode       { get; set; } = "+91";
+    public double                             TotalAmountPaid   { get; set; }
+    public int                                TotalPaidWebinars { get; set; }
+    public int                                TotalFreeWebinars { get; set; }
+    public int                                TotalWebinars     { get; set; }
+    public IEnumerable<StudentPaymentItemDto> Webinars          { get; set; } = new List<StudentPaymentItemDto>();
+}
+

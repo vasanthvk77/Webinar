@@ -136,6 +136,24 @@ public class WebinarsController : ControllerBase
     }
 
     // -------------------------------------------------------
+    // GET /api/webinars/my-payments — Student Payments & Enrolled Webinars
+    // Calls: wms.sp_StudentPaymentDetails
+    // -------------------------------------------------------
+    [HttpGet("my-payments")]
+    public async Task<IActionResult> GetStudentPayments()
+    {
+        _logger.LogInformation("[WebinarsController] GET /api/webinars/my-payments — CallerUserId: {UserId}", CallerUserId);
+
+        if (CallerUserId <= 0)
+        {
+            return Unauthorized(new { success = false, message = "Authentication required." });
+        }
+
+        var payments = await _webinarService.GetStudentPaymentsAsync(CallerUserId);
+        return Ok(new { success = true, data = payments });
+    }
+
+    // -------------------------------------------------------
     // GET /api/webinars/{id}/certificate/download — Condition 3: Certificate Download
     // Strict Verification: Checks if student is eligible for certificate before streaming PDF
     // -------------------------------------------------------

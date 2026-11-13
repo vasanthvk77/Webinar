@@ -104,6 +104,8 @@ public class StudentDashboardStatsDto
     public int TotalRegistrations { get; set; }
     public int FreeRegistrations { get; set; }
     public int PaidRegistrations { get; set; }
+    public double TotalAmountPaid { get; set; }
+    public string CountryCode { get; set; } = "+91";
     public int CompletedWebinars { get; set; }
     public int UpcomingWebinars { get; set; }
     public int CertificatesCount { get; set; }

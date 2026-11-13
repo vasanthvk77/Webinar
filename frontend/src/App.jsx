@@ -30,6 +30,7 @@ import StudentWebinars    from './pages/student/StudentWebinars';
 import MyCertificates      from './pages/student/MyCertificates';
 import StudentDashboard    from './pages/student/StudentDashboard';
 import StudentProfile      from './pages/student/StudentProfile';
+import StudentPayments     from './pages/student/StudentPayments';
 
 // -------------------------------------------------------
 // RoleRedirect
@@ -96,7 +97,7 @@ function AppInner() {
               <Route path="completed"     element={<Navigate to="/dashboard/webinars?tab=completed" replace />} />
               <Route path="certificates"  element={<MyCertificates />} />
               <Route path="recordings"    element={<ModulePlaceholder />} />
-              <Route path="payments"      element={<ModulePlaceholder />} />
+              <Route path="payments"      element={<StudentPayments />} />
               <Route path="notifications" element={<ModulePlaceholder />} />
             </Route>
 

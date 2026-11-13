@@ -22,6 +22,7 @@ namespace WebinarApi.Services
         Task<IEnumerable<CompletedWebinarDto>>                           GetCompletedWebinarsAsync(int userId, long? webinarId = null);
         Task<IEnumerable<ParticipantSummaryDto>>                         GetParticipantsAsync(long? webinarId = null);
         Task<PaymentsSummaryDto>                                         GetPaymentsAsync();
+        Task<StudentPaymentsSummaryDto>                                  GetStudentPaymentsAsync(int userId);
         Task<string>                                                     UploadWebinarImageAsync(IFormFile file, string? existingImageUrl = null);
     }
 
@@ -182,6 +183,37 @@ namespace WebinarApi.Services
             {
                 _logger.LogError(ex, "[Webinar] GetPaymentsAsync EXCEPTION: {Message}", ex.Message);
                 return new PaymentsSummaryDto();
+            }
+        }
+
+        // -------------------------------------------------------
+        // Get Student Payments & Enrolled Webinars (Calls: wms.sp_StudentPaymentDetails)
+        // -------------------------------------------------------
+        public async Task<StudentPaymentsSummaryDto> GetStudentPaymentsAsync(int userId)
+        {
+            _logger.LogInformation("[Webinar] GetStudentPaymentsAsync called for UserId: {UserId}", userId);
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                using var multi = await conn.QueryMultipleAsync(
+                    "wms.sp_StudentPaymentDetails",
+                    new { UserId = userId },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                var summary = await multi.ReadFirstOrDefaultAsync<StudentPaymentsSummaryDto>()
+                              ?? new StudentPaymentsSummaryDto { UserId = userId };
+                var list = (await multi.ReadAsync<StudentPaymentItemDto>()).ToList();
+                summary.Webinars = list;
+
+                _logger.LogInformation("[Webinar] GetStudentPaymentsAsync returned {Count} records for UserId: {UserId}, TotalPaid: {TotalPaid}",
+                    list.Count, userId, summary.TotalAmountPaid);
+                return summary;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Webinar] GetStudentPaymentsAsync EXCEPTION for UserId: {UserId}: {Message}", userId, ex.Message);
+                return new StudentPaymentsSummaryDto { UserId = userId };
             }
         }
 

@@ -1601,4 +1601,59 @@ BEGIN
 END
 GO
 
+-- ============================================================
+-- SP: wms.sp_StudentPaymentDetails
+-- Purpose: Retrieves enrolled webinars, payment details and country code for a student
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_StudentPaymentDetails' AND s.name = 'wms')
+    DROP PROCEDURE wms.sp_StudentPaymentDetails;
+GO
+
+CREATE PROCEDURE wms.sp_StudentPaymentDetails
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- 1. Summary Totals & User CountryCode
+    SELECT 
+        u.Id AS UserId,
+        ISNULL(u.CountryCode, '+91') AS CountryCode,
+        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmountPaid,
+        COUNT(CASE WHEN w.IsPaid = 1 THEN 1 END) AS TotalPaidWebinars,
+        COUNT(CASE WHEN w.IsPaid = 0 THEN 1 END) AS TotalFreeWebinars,
+        COUNT(wr.Id) AS TotalWebinars
+    FROM wms.Users u
+    LEFT JOIN wms.WebinarRegistrations wr ON wr.UserId = u.Id
+    LEFT JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    WHERE u.Id = @UserId
+    GROUP BY u.Id, u.CountryCode;
+
+    -- 2. Registered Webinars List for this Student
+    SELECT
+        w.Id AS WebinarId,
+        w.WebinarName,
+        w.CategoryId,
+        c.CategoryName,
+        w.ConductorName,
+        w.WebinarDate,
+        w.StartTime,
+        w.EndTime,
+        w.DurationMinutes,
+        w.IsPaid,
+        ISNULL(w.Price, 0.0) AS Price,
+        CAST(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END AS FLOAT) AS AmountPaid,
+        w.ParticipantLimit,
+        w.ShareId,
+        w.ImageUrl,
+        w.IsCompleted,
+        wr.CreatedDateTime AS RegisteredAt
+    FROM wms.WebinarRegistrations wr
+    INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    WHERE wr.UserId = @UserId
+    ORDER BY wr.CreatedDateTime DESC;
+END
+GO
+
 
