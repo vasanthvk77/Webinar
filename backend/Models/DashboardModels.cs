@@ -87,6 +87,13 @@ public class DashboardMonthlyTrendDto
     public int RegistrationCount { get; set; }
 }
 
+public class DashboardCountryRevenueDto
+{
+    public string CountryCode       { get; set; } = "+91";
+    public double TotalAmount       { get; set; }
+    public int    RegistrationCount { get; set; }
+}
+
 public class AdminDashboardResponseDto
 {
     public AdminDashboardStatsDto Summary { get; set; } = new();
@@ -94,6 +101,7 @@ public class AdminDashboardResponseDto
     public List<DashboardRecentWebinarDto> RecentWebinars { get; set; } = new();
     public List<DashboardRecentParticipantDto> RecentParticipants { get; set; } = new();
     public List<DashboardMonthlyTrendDto> MonthlyTrends { get; set; } = new();
+    public List<DashboardCountryRevenueDto> CountryRevenues { get; set; } = new();
 }
 
 // ========================================================

@@ -1030,6 +1030,7 @@ import "react-international-phone/style.css";
 import { authService, webinarService } from "../services/api";
 import { validateEmail, validatePassword } from "../utils/validation";
 import { useAppTheme } from "../context/ThemeContext";
+import { getCurrencySymbolFromCountryCode } from "../utils/countryUtils";
 import logo from "../assets/logo1.png";
 
 /* Newer MUI versions ignore layout props (alignItems, justifyContent, gap, flexWrap)
@@ -1134,7 +1135,8 @@ const WebinarRegistration = ({ mode }) => {
             ...prev,
             email: u.email || prev.email,
             firstName: u.firstName || prev.firstName,
-            lastName: u.lastName || prev.lastName
+            lastName: u.lastName || prev.lastName,
+            countryCode: u.countryCode || prev.countryCode
           }));
         }
       }
@@ -1198,8 +1200,20 @@ const WebinarRegistration = ({ mode }) => {
     setError("");
   };
 
-  const handlePhoneChange = (phone) => {
-    setFormData((prev) => ({ ...prev, mobileNumber: phone.replaceAll(/[^0-9+]/g, "") }));
+  const handlePhoneChange = (phone, meta) => {
+    const cleanPhone = (phone || "").replaceAll(/[^0-9+]/g, "");
+    let dial = "";
+    if (meta?.country?.dialCode) {
+      dial = meta.country.dialCode.startsWith("+") ? meta.country.dialCode : `+${meta.country.dialCode}`;
+    } else {
+      const match = cleanPhone.match(/^\+(\d{1,3})/);
+      if (match) dial = `+${match[1]}`;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      mobileNumber: cleanPhone,
+      countryCode: dial || prev.countryCode
+    }));
   };
 
   const handleStartRegistration = () => {
@@ -1224,6 +1238,9 @@ const WebinarRegistration = ({ mode }) => {
           firstName: existing.firstName,
           email: existing.email || formData.email
         });
+        if (existing.countryCode) {
+          setFormData((prev) => ({ ...prev, countryCode: existing.countryCode }));
+        }
 
         // Atomically hold seat for this identified user
         try {
@@ -1421,7 +1438,18 @@ const WebinarRegistration = ({ mode }) => {
   };
 
   const info = webinarInfo || {};
-  const amount = Number(info.price || 0).toLocaleString("en-IN");
+
+  // Derive active country code for dynamic pricing
+  const activeCountryCode = existingUser?.countryCode || formData.countryCode || webinarInfo?.countryPrices?.[0]?.countryCode || "+91";
+
+  // Match price configured for this country in wms.WebinarPayments
+  const matchedCountryPrice = (webinarInfo?.countryPrices || []).find(
+    (p) => p.countryCode === activeCountryCode || p.countryCode?.replace(/[^\d]/g, '') === activeCountryCode?.replace(/[^\d]/g, '')
+  ) || webinarInfo?.countryPrices?.[0];
+
+  const currentPrice = matchedCountryPrice != null ? matchedCountryPrice.amount : (info.price || 0);
+  const currentCurrency = matchedCountryPrice?.currencySymbol || getCurrencySymbolFromCountryCode(activeCountryCode);
+  const amount = Number(currentPrice || 0).toLocaleString();
   const isCapacityFull = Boolean(info.participantLimit && info.participantLimit > 0 && (info.registrationCount || 0) >= info.participantLimit);
   const isSessionEnded = Boolean(info.isCompleted || (info.endTime && new Date(info.endTime) < new Date()));
 
@@ -1525,7 +1553,7 @@ const WebinarRegistration = ({ mode }) => {
 
                 <Stack direction="row" useFlexGap flexWrap="wrap" gap={1} sx={{ mt: 3 }}>
                   <Box sx={{ px: 1.75, py: .7, borderRadius: "999px", bgcolor: "#fef3c7", color: "#92400e", fontSize: 13, fontWeight: FW.semibold }}>
-                    {info.isPaid ? `₹${amount} per seat` : "Free to attend"}
+                    {info.isPaid ? `${currentCurrency}${amount} per seat` : "Free to attend"}
                   </Box>
                   {info.categoryName && (
                     <Box sx={{ px: 1.75, py: .7, borderRadius: "999px", border: "1px solid rgba(255,255,255,.35)", fontSize: 13, fontWeight: FW.regular }}>
@@ -1585,7 +1613,7 @@ const WebinarRegistration = ({ mode }) => {
                       {[
                         "Live and interactive Q&A with the speaker",
                         "Joining details sent right after registration",
-                        info.isPaid ? `One-time fee of ₹${amount}, no hidden charges` : "Completely free to attend"
+                        info.isPaid ? `One-time fee of ${currentCurrency}${amount}, no hidden charges` : "Completely free to attend"
                       ].map((text) => (
                         <Stack key={text} direction="row" spacing={1.25} alignItems="center">
                           <Box sx={{ color: colors.green, display: "flex" }}><CheckCircle2 size={18} /></Box>
@@ -1802,7 +1830,7 @@ const WebinarRegistration = ({ mode }) => {
                           <Divider sx={{ my: 1.5, borderColor: colors.line }} />
                           <Stack direction="row" justifyContent="space-between" alignItems="center">
                             <Typography sx={{ fontSize: 14, color: colors.muted }}>Total (1 seat)</Typography>
-                            <Typography sx={{ fontSize: 26, fontWeight: FW.semibold, letterSpacing: "-.02em" }}>₹{amount}</Typography>
+                            <Typography sx={{ fontSize: 26, fontWeight: FW.semibold, letterSpacing: "-.02em" }}>{currentCurrency}{amount}</Typography>
                           </Stack>
                         </Box>
 
@@ -1835,7 +1863,7 @@ const WebinarRegistration = ({ mode }) => {
                         </RadioGroup>
 
                         <Button fullWidth disabled={paying} onClick={handleCompletePayment} endIcon={!paying && <ArrowRight size={18} />} sx={primaryButtonSx}>
-                          {paying ? <CircularProgress size={22} sx={{ color: "#fff" }} /> : `Pay ₹${amount}`}
+                          {paying ? <CircularProgress size={22} sx={{ color: "#fff" }} /> : `Pay ${currentCurrency}${amount}`}
                         </Button>
                         <Stack direction="row" alignItems="center" justifyContent="center" spacing={.8} sx={{ color: colors.muted }}>
                           <ShieldCheck size={14} color={colors.green} />

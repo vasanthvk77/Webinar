@@ -4,7 +4,8 @@ import {
   TableContainer, TableHead, TableRow, IconButton, Tooltip,
   Dialog, DialogContent, DialogActions, TextField, MenuItem,
   CircularProgress, Divider, Menu, ListItemIcon, Switch,
-  FormControlLabel, Chip, InputAdornment,
+  FormControlLabel, Chip, InputAdornment, Select, Checkbox,
+  FormControl,
 } from '@mui/material';
 import AddIcon           from '@mui/icons-material/Add';
 import DeleteIcon        from '@mui/icons-material/Delete';
@@ -31,6 +32,12 @@ import CustomSearchBar      from '../../components/CustomSearchBar';
 import CustomPagination     from '../../components/CustomPagination';
 import CustomTimePicker     from '../../components/CustomeTimePicker';
 import CustomDatePicker     from '../../components/CustomeDatePicker';
+import {
+  getFlagEmoji,
+  getCountryNameFromCode,
+  getCountryFromCode,
+  getCurrencySymbolFromCountryCode,
+} from '../../utils/countryUtils';
 import {
   formatUtcToLocal,
   formatUtcToLocalDateOnly,
@@ -92,6 +99,8 @@ const EMPTY_FORM = {
   isPaid:           false,
   price:            '',
   imageUrl:         '',
+  selectedCountries: [],
+  countryPrices:    {},
 };
 
 // â”€â”€ Calculate duration in minutes from "HH:mm" strings â”€â”€
@@ -120,6 +129,7 @@ export default function Webinars() {
   const [filtered,   setFiltered]   = useState([]);
   const [categories, setCategories] = useState([]);
   const [certificateTemplates, setCertificateTemplates] = useState([]);
+  const [availableCountryCodes, setAvailableCountryCodes] = useState(['+91', '+1']);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
 
@@ -147,18 +157,22 @@ export default function Webinars() {
     [form.startTime, form.endTime]
   );
 
-  // â”€â”€ Load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Load ─────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [wRes, cRes, tRes] = await Promise.all([
+      const [wRes, cRes, tRes, ccRes] = await Promise.all([
         webinarService.getAll(),
         categoryService.getAll(),
         certificateTemplateService.getAll().catch(() => ({ data: { success: false, data: [] } })),
+        webinarService.getCountryCodes().catch(() => ({ data: { success: false, data: [] } })),
       ]);
       if (wRes.data.success) { setWebinars(wRes.data.data); setFiltered(wRes.data.data); }
       if (cRes.data.success)   setCategories(cRes.data.data);
       if (tRes.data?.success)  setCertificateTemplates(tRes.data.data);
+      if (ccRes.data?.success && Array.isArray(ccRes.data.data) && ccRes.data.data.length > 0) {
+        setAvailableCountryCodes(ccRes.data.data);
+      }
     } catch {
       toast.error('Failed to load webinars');
     } finally {
@@ -190,14 +204,14 @@ export default function Webinars() {
     return filtered.slice(start, start + pageSize);
   }, [filtered, page, pageSize]);
 
-  // â”€â”€ Menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Menu ─────────────────────────────────────────────
   const openMenu  = (e, row) => {
     if (row?.isCompleted) return;
     setMenu({ anchorEl: e.currentTarget, row });
   };
   const closeMenu = ()       => setMenu(null);
 
-  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Helpers ──────────────────────────────────────────
   const setField = (key, val) => { setForm(p => ({ ...p, [key]: val })); setFormError(''); };
 
   const toISOLocal = (d) => formatUtcToLocalDateDDMMYYYY(d);
@@ -210,19 +224,46 @@ export default function Webinars() {
   // Extract local "YYYY-MM-DD" from stored UTC datetime string
   const toInputDate = (d) => formatUtcToLocalDateInput(d);
 
-  // â”€â”€ Modals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Modals ───────────────────────────────────────────
   const openCreate = () => {
     setSelectedImageFile(null);
     setImagePreview(null);
-    setForm(EMPTY_FORM);
+    const initialCode = availableCountryCodes.length > 0 ? availableCountryCodes[0] : '+91';
+    setForm({
+      ...EMPTY_FORM,
+      selectedCountries: [initialCode],
+      countryPrices: { [initialCode]: '' },
+    });
     setFormError('');
     setModal('create');
   };
 
-  const openEdit = (row) => {
+  const openEdit = async (row) => {
     setTarget(row);
     setSelectedImageFile(null);
     setImagePreview(row.imageUrl ? getFullWebinarImageUrl(row.imageUrl) : null);
+
+    let selected = [];
+    let pricesMap = {};
+
+    try {
+      const pRes = await webinarService.getWebinarPrices(row.id);
+      if (pRes.data?.success && Array.isArray(pRes.data.data) && pRes.data.data.length > 0) {
+        pRes.data.data.forEach(p => {
+          selected.push(p.countryCode);
+          pricesMap[p.countryCode] = String(p.amount);
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load country prices for webinar', err);
+    }
+
+    if (selected.length === 0 && row.isPaid) {
+      const fallbackCode = availableCountryCodes.length > 0 ? availableCountryCodes[0] : '+91';
+      selected = [fallbackCode];
+      pricesMap[fallbackCode] = row.price != null ? String(row.price) : '';
+    }
+
     setForm({
       webinarName:       row.webinarName,
       categoryId:        String(row.categoryId),
@@ -237,6 +278,8 @@ export default function Webinars() {
       isPaid:            row.isPaid,
       price:             row.price != null ? String(row.price) : '',
       imageUrl:          row.imageUrl || '',
+      selectedCountries: selected,
+      countryPrices:    pricesMap,
     });
     setFormError('');
     setModal('edit');
@@ -395,8 +438,19 @@ export default function Webinars() {
     if (!form.conductorName.trim()) return { err: 'Conductor name is required' };
     if (!form.participantLimit || Number(form.participantLimit) <= 0)
                                     return { err: 'Participant limit must be greater than 0' };
-    if (form.isPaid && (!form.price || Number(form.price) <= 0))
-                                    return { err: 'Price must be greater than 0 for paid webinars' };
+
+    if (form.isPaid) {
+      if (!form.selectedCountries || form.selectedCountries.length === 0) {
+        return { err: 'Please select at least one country for pricing' };
+      }
+      for (const code of form.selectedCountries) {
+        const countryName = getCountryNameFromCode(code);
+        const amt = form.countryPrices?.[code];
+        if (amt === undefined || amt === '' || isNaN(Number(amt)) || Number(amt) <= 0) {
+          return { err: `Please enter a valid price (> 0) for ${countryName} (${code})` };
+        }
+      }
+    }
 
     // Parse user's selected date and time using their local system timezone (no hardcoded offset)
     const [year, month, day] = form.webinarDate.split('-').map(Number);
@@ -410,6 +464,17 @@ export default function Webinars() {
     // .toISOString() automatically converts the user's system local time into UTC with 'Z' suffix
     const startDateTime = localStart.toISOString();
     const endDateTime   = localEnd.toISOString();
+
+    const countryPricesPayload = form.isPaid
+      ? form.selectedCountries.map(code => ({
+          countryCode: code,
+          amount: Number(form.countryPrices[code])
+        }))
+      : [];
+
+    const basePrice = form.isPaid && countryPricesPayload.length > 0
+      ? countryPricesPayload[0].amount
+      : null;
 
     return {
       payload: {
@@ -425,7 +490,8 @@ export default function Webinars() {
         conductorEmail:    form.conductorEmail.trim() || null,
         participantLimit:  Number(form.participantLimit),
         isPaid:            form.isPaid,
-        price:             form.isPaid ? Number(form.price) : null,
+        price:             basePrice,
+        countryPrices:     countryPricesPayload,
         imageUrl:          form.imageUrl || null,
       }
     };
@@ -809,10 +875,79 @@ export default function Webinars() {
 
                     <TableCell sx={{ ...bodyCellSx, fontSize: '13px', color: colors.textSecondary }}>{w.participantLimit}</TableCell>
                     <TableCell sx={bodyCellSx}>
-                      {w.isPaid
-                        ? <Chip label={`₹${w.price}`} size="small" sx={{ fontSize: '11px', fontWeight: 700, bgcolor: 'rgba(34,197,94,0.12)', color: colors.success }} />
-                        : <Chip label="Free"          size="small" sx={{ fontSize: '11px', fontWeight: 700, bgcolor: colors.surfaceAlt, color: colors.textMuted }} />
-                      }
+                      {w.isPaid ? (
+                        w.countryPrices && w.countryPrices.length > 0 ? (
+                          <Tooltip
+                            title={
+                              <Box sx={{ p: 0.5 }}>
+                                <Typography sx={{ fontSize: '11px', fontWeight: 800, color: '#16a34a', mb: 0.75, letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                                  Country Pricing
+                                </Typography>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
+                                  {w.countryPrices.map((cp) => {
+                                    const cName = getCountryNameFromCode(cp.countryCode);
+                                    const cObj = getCountryFromCode(cp.countryCode);
+                                    const flag = cObj?.flag || getFlagEmoji(cObj?.iso2) || '🌐';
+                                    const sym = getCurrencySymbolFromCountryCode(cp.countryCode);
+                                    return (
+                                      <Box key={cp.countryCode} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
+                                        <Typography sx={{ fontSize: '12px', fontWeight: 600, color: colors.textSecondary, display: 'flex', alignItems: 'center', gap: 0.6 }}>
+                                          <span style={{ fontSize: '14px' }}>{flag}</span> {cName} ({cp.countryCode})
+                                        </Typography>
+                                        <Typography sx={{ fontSize: '12.5px', fontWeight: 800, color: colors.primary }}>
+                                          {sym}{cp.amount}
+                                        </Typography>
+                                      </Box>
+                                    );
+                                  })}
+                                </Box>
+                              </Box>
+                            }
+                            arrow
+                            slotProps={{
+                              tooltip: {
+                                sx: {
+                                  bgcolor: colors.surface,
+                                  color: colors.primary,
+                                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12), 0 8px 10px -6px rgba(0,0,0,0.08)',
+                                  border: `1px solid ${colors.border}`,
+                                  borderRadius: '10px',
+                                  p: 1.25,
+                                  minWidth: 200
+                                }
+                              },
+                              arrow: {
+                                sx: {
+                                  color: colors.surface,
+                                  '&::before': {
+                                    border: `1px solid ${colors.border}`
+                                  }
+                                }
+                              }
+                            }}
+                          >
+                            <Chip
+                              label={
+                                w.countryPrices.length === 1
+                                  ? `${getCurrencySymbolFromCountryCode(w.countryPrices[0].countryCode)}${w.countryPrices[0].amount}`
+                                  : `${getCurrencySymbolFromCountryCode(w.countryPrices[0].countryCode)}${w.countryPrices[0].amount} (${w.countryPrices.length} countries)`
+                              }
+                              size="small"
+                              sx={{
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                bgcolor: 'rgba(34,197,94,0.12)',
+                                color: colors.success,
+                                cursor: 'pointer',
+                              }}
+                            />
+                          </Tooltip>
+                        ) : (
+                          <Chip label={`₹${w.price}`} size="small" sx={{ fontSize: '11px', fontWeight: 700, bgcolor: 'rgba(34,197,94,0.12)', color: colors.success }} />
+                        )
+                      ) : (
+                        <Chip label="Free" size="small" sx={{ fontSize: '11px', fontWeight: 700, bgcolor: colors.surfaceAlt, color: colors.textMuted }} />
+                      )}
                     </TableCell>
 
                     {/* Status / quick actions */}
@@ -1261,43 +1396,196 @@ export default function Webinars() {
 
           <Divider sx={{ borderColor: colors.border, my: 2 }} />
 
-          {/* Row 5 â€” IsPaid toggle + Price */}
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 3, mb: 1 }}>
-            <Box sx={{ pt: 0.5 }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={form.isPaid}
-                    onChange={e => { setField('isPaid', e.target.checked); if (!e.target.checked) setField('price', ''); }}
-                    sx={{
-                      '& .MuiSwitch-switchBase.Mui-checked': { color: colors.accent },
-                      '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: colors.accent },
-                    }}
-                  />
-                }
-                label={
-                  <Typography sx={{ fontSize: '13px', fontWeight: 500, color: colors.textSecondary }}>
-                    Paid Webinar
-                  </Typography>
-                }
-              />
-            </Box>
-            {form.isPaid && (
-              <Box sx={{ flex: 1, maxWidth: 220 }}>
-                <Label text="Price" required />
-                <TextField
-                  fullWidth size="small" type="number" placeholder="0.00"
-                  value={form.price} onChange={e => setField('price', e.target.value)}
-                  inputProps={{ min: 0.01, step: '0.01' }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <CurrencyRupeeIcon sx={{ fontSize: 16, color: colors.textMuted }} />
-                      </InputAdornment>
-                    ),
+          {/* Row 5 — IsPaid toggle + Multi-Country Localized Pricing */}
+          <Box sx={{ mb: 1 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={form.isPaid}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    setField('isPaid', checked);
+                    if (checked && (!form.selectedCountries || form.selectedCountries.length === 0)) {
+                      const initialCode = availableCountryCodes.length > 0 ? availableCountryCodes[0] : '+91';
+                      setForm(p => ({
+                        ...p,
+                        isPaid: true,
+                        selectedCountries: [initialCode],
+                        countryPrices: { ...(p.countryPrices || {}), [initialCode]: p.countryPrices?.[initialCode] || '' },
+                      }));
+                    }
                   }}
-                  sx={inputSx}
+                  sx={{
+                    '& .MuiSwitch-switchBase.Mui-checked': { color: colors.accent },
+                    '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { bgcolor: colors.accent },
+                  }}
                 />
+              }
+              label={
+                <Typography sx={{ fontSize: '13px', fontWeight: 600, color: colors.textSecondary }}>
+                  Paid Webinar
+                </Typography>
+              }
+            />
+
+            {form.isPaid && (
+              <Box sx={{ mt: 2, p: 2.2, bgcolor: colors.surfaceAlt, borderRadius: 2.5, border: `1px solid ${colors.border}` }}>
+                {/* Country Multi-Select Dropdown with Checkboxes */}
+                <Box sx={{ mb: 2 }}>
+                  <Label text="Select Pricing Countries" required />
+                  <FormControl fullWidth size="small" sx={inputSx}>
+                    <Select
+                      multiple
+                      value={form.selectedCountries || []}
+                      onChange={e => {
+                        const val = typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value;
+                        setForm(p => {
+                          const newPrices = { ...(p.countryPrices || {}) };
+                          val.forEach(c => {
+                            if (newPrices[c] === undefined) newPrices[c] = '';
+                          });
+                          return {
+                            ...p,
+                            selectedCountries: val,
+                            countryPrices: newPrices,
+                          };
+                        });
+                        setFormError('');
+                      }}
+                      renderValue={selected => (
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.8 }}>
+                          {selected.map(code => {
+                            const countryName = getCountryNameFromCode(code);
+                            const countryObj  = getCountryFromCode(code);
+                            const flag        = countryObj?.flag || getFlagEmoji(countryObj?.iso2) || '🌐';
+                            return (
+                              <Chip
+                                key={code}
+                                label={`${flag} ${countryName} (${code})`}
+                                size="small"
+                                sx={{
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  bgcolor: 'rgba(255, 122, 0, 0.12)',
+                                  color: colors.accent,
+                                  borderRadius: 1.5,
+                                }}
+                              />
+                            );
+                          })}
+                        </Box>
+                      )}
+                    >
+                      {Array.from(new Set([...availableCountryCodes, ...(form.selectedCountries || []), '+91', '+1'])).map(code => {
+                        const countryName = getCountryNameFromCode(code);
+                        const countryObj  = getCountryFromCode(code);
+                        const flag        = countryObj?.flag || getFlagEmoji(countryObj?.iso2) || '🌐';
+                        const currSymbol  = getCurrencySymbolFromCountryCode(code);
+                        const isChecked   = (form.selectedCountries || []).includes(code);
+
+                        return (
+                          <MenuItem key={code} value={code} sx={{ py: 1 }}>
+                            <Checkbox checked={isChecked} size="small" sx={{ mr: 1, '&.Mui-checked': { color: colors.accent } }} />
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, width: '100%' }}>
+                              <Typography sx={{ fontSize: 18 }}>{flag}</Typography>
+                              <Typography sx={{ fontSize: 13, fontWeight: 600, color: colors.primary, flex: 1 }}>
+                                {countryName} ({code})
+                              </Typography>
+                              <Chip
+                                label={`Currency: ${currSymbol}`}
+                                size="small"
+                                sx={{
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  bgcolor: 'rgba(0,0,0,0.06)',
+                                  color: colors.textSecondary,
+                                  height: 22,
+                                }}
+                              />
+                            </Box>
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                  </FormControl>
+                </Box>
+
+                {/* Dynamic Price Inputs for Every Selected Country */}
+                {form.selectedCountries && form.selectedCountries.length > 0 && (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                    <Typography sx={{ fontSize: '12px', fontWeight: 700, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Set Payment Amount for Selected Countries
+                    </Typography>
+
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                      {form.selectedCountries.map(code => {
+                        const countryName = getCountryNameFromCode(code);
+                        const countryObj  = getCountryFromCode(code);
+                        const flag        = countryObj?.flag || getFlagEmoji(countryObj?.iso2) || '🌐';
+                        const currSymbol  = getCurrencySymbolFromCountryCode(code);
+                        const priceVal    = form.countryPrices?.[code] ?? '';
+
+                        return (
+                          <Box
+                            key={code}
+                            sx={{
+                              p: 1.8,
+                              borderRadius: 2,
+                              bgcolor: colors.surface,
+                              border: `1px solid ${colors.border}`,
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                            }}
+                          >
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography sx={{ fontSize: 18 }}>{flag}</Typography>
+                                <Typography sx={{ fontSize: '13px', fontWeight: 700, color: colors.primary }}>
+                                  {countryName}
+                                </Typography>
+                              </Box>
+                              <Chip
+                                label={code}
+                                size="small"
+                                sx={{ fontSize: '11px', fontWeight: 600, bgcolor: colors.surfaceAlt, color: colors.textSecondary, height: 20 }}
+                              />
+                            </Box>
+
+                            <Label text={`${countryName} Price (${currSymbol})`} required />
+                            <TextField
+                              fullWidth
+                              size="small"
+                              type="number"
+                              placeholder={`e.g. ${code === '+91' ? '299' : '4'}`}
+                              value={priceVal}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setForm(p => ({
+                                  ...p,
+                                  countryPrices: {
+                                    ...(p.countryPrices || {}),
+                                    [code]: val,
+                                  },
+                                }));
+                                setFormError('');
+                              }}
+                              inputProps={{ min: 0.01, step: '0.01' }}
+                              InputProps={{
+                                startAdornment: (
+                                  <InputAdornment position="start">
+                                    <Typography sx={{ fontSize: 15, fontWeight: 800, color: colors.accent }}>
+                                      {currSymbol}
+                                    </Typography>
+                                  </InputAdornment>
+                                ),
+                              }}
+                              sx={inputSx}
+                            />
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  </Box>
+                )}
               </Box>
             )}
           </Box>

@@ -419,7 +419,7 @@ export default function StudentDashboard() {
                   />
 
                   <Chip
-                    label={latest.isPaid ? `Paid • ₹${latest.price || 0}` : 'Free Webinar'}
+                    label={latest.isPaid ? `Paid • ${currencySymbol}${Number(latest.price || 0).toLocaleString('en-IN')}` : 'Free Webinar'}
                     size="small"
                     sx={{
                       bgcolor: latest.isPaid ? '#fee2e2' : '#f0fdf4',

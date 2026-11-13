@@ -23,6 +23,8 @@ namespace WebinarApi.Services
         Task<IEnumerable<ParticipantSummaryDto>>                         GetParticipantsAsync(long? webinarId = null);
         Task<PaymentsSummaryDto>                                         GetPaymentsAsync();
         Task<StudentPaymentsSummaryDto>                                  GetStudentPaymentsAsync(int userId);
+        Task<IEnumerable<string>>                                        GetDistinctUserCountryCodesAsync();
+        Task<IEnumerable<WebinarCountryPriceDto>>                        GetWebinarCountryPricesAsync(long webinarId);
         Task<string>                                                     UploadWebinarImageAsync(IFormFile file, string? existingImageUrl = null);
     }
 
@@ -54,6 +56,28 @@ namespace WebinarApi.Services
                     commandType: CommandType.StoredProcedure
                 );
                 var list = rows.ToList();
+
+                // Fetch multi-country dynamic pricing and attach to each webinar
+                try
+                {
+                    var allPrices = (await conn.QueryAsync<WebinarCountryPriceDto>(
+                        "wms.usp_GetAllWebinarCountryPrices",
+                        commandType: CommandType.StoredProcedure
+                    )).GroupBy(p => p.WebinarId ?? 0).ToDictionary(g => g.Key, g => g.ToList());
+
+                    foreach (var w in list)
+                    {
+                        if (allPrices.TryGetValue(w.Id, out var cpList))
+                        {
+                            w.CountryPrices = cpList;
+                        }
+                    }
+                }
+                catch (Exception pEx)
+                {
+                    _logger.LogWarning(pEx, "[Webinar] GetAll could not load country pricing: {Message}", pEx.Message);
+                }
+
                 _logger.LogInformation("[Webinar] GetAll returned {Count} records.", list.Count);
                 return list;
             }
@@ -61,6 +85,82 @@ namespace WebinarApi.Services
             {
                 _logger.LogError(ex, "[Webinar] GetAll EXCEPTION: {Message}", ex.Message);
                 return Enumerable.Empty<WebinarDto>();
+            }
+        }
+
+        // -------------------------------------------------------
+        // Get Distinct User Country Codes
+        // -------------------------------------------------------
+        public async Task<IEnumerable<string>> GetDistinctUserCountryCodesAsync()
+        {
+            _logger.LogInformation("[Webinar] GetDistinctUserCountryCodesAsync called");
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                var rows = await conn.QueryAsync<string>(
+                    "wms.usp_GetDistinctUserCountryCodes",
+                    commandType: CommandType.StoredProcedure
+                );
+                var list = rows.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).Distinct().ToList();
+                _logger.LogInformation("[Webinar] Found {Count} distinct user country codes", list.Count);
+                return list;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Webinar] GetDistinctUserCountryCodesAsync EXCEPTION: {Message}", ex.Message);
+                return Enumerable.Empty<string>();
+            }
+        }
+
+        // -------------------------------------------------------
+        // Get Webinar Country Prices
+        // -------------------------------------------------------
+        public async Task<IEnumerable<WebinarCountryPriceDto>> GetWebinarCountryPricesAsync(long webinarId)
+        {
+            _logger.LogInformation("[Webinar] GetWebinarCountryPricesAsync called for WebinarId: {WebinarId}", webinarId);
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                var rows = await conn.QueryAsync<WebinarCountryPriceDto>(
+                    "wms.usp_GetWebinarCountryPrices",
+                    new { WebinarId = webinarId },
+                    commandType: CommandType.StoredProcedure
+                );
+                return rows.ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Webinar] GetWebinarCountryPricesAsync EXCEPTION: {Message}", ex.Message);
+                return Enumerable.Empty<WebinarCountryPriceDto>();
+            }
+        }
+
+        // -------------------------------------------------------
+        // Helper: Save Country Prices
+        // -------------------------------------------------------
+        private async Task SaveCountryPricesAsync(SqlConnection conn, long webinarId, IEnumerable<WebinarCountryPriceDto>? prices)
+        {
+            if (prices == null || !prices.Any()) return;
+
+            // Clean up existing prices before re-inserting
+            await conn.ExecuteAsync(
+                "wms.usp_DeleteWebinarCountryPrices",
+                new { WebinarId = webinarId },
+                commandType: CommandType.StoredProcedure
+            );
+
+            foreach (var cp in prices.Where(p => !string.IsNullOrWhiteSpace(p.CountryCode) && p.Amount > 0))
+            {
+                await conn.ExecuteAsync(
+                    "wms.usp_SaveWebinarCountryPrice",
+                    new
+                    {
+                        WebinarId   = webinarId,
+                        CountryCode = cp.CountryCode.Trim(),
+                        Amount      = cp.Amount
+                    },
+                    commandType: CommandType.StoredProcedure
+                );
             }
         }
 
@@ -115,6 +215,35 @@ namespace WebinarApi.Services
                     commandType: CommandType.StoredProcedure
                 );
                 var list = rows.ToList();
+                if (list.Any(x => x.IsPaid && (x.Price == null || x.Price == 0)))
+                {
+                    var userCountryCode = await conn.QueryFirstOrDefaultAsync<string>(
+                        "SELECT TOP 1 CountryCode FROM wms.Users WHERE Id = @UserId",
+                        new { UserId = userId }
+                    );
+
+                    try
+                    {
+                        var allPrices = (await conn.QueryAsync<WebinarCountryPriceDto>(
+                            "wms.usp_GetAllWebinarCountryPrices",
+                            commandType: CommandType.StoredProcedure
+                        )).GroupBy(p => p.WebinarId ?? 0).ToDictionary(g => g.Key, g => g.ToList());
+
+                        foreach (var item in list)
+                        {
+                            if (item.IsPaid && (item.Price == null || item.Price == 0))
+                            {
+                                if (allPrices.TryGetValue(item.WebinarId, out var cpList) && cpList.Any())
+                                {
+                                    var matched = cpList.FirstOrDefault(p => p.CountryCode == userCountryCode) ?? cpList.First();
+                                    item.Price = matched.Amount;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
                 _logger.LogInformation("[Webinar] GetCompletedWebinarsAsync returned {Count} records for UserId: {UserId}", list.Count, userId);
                 return list;
             }
@@ -165,6 +294,60 @@ namespace WebinarApi.Services
                 );
                 var list = rows.ToList();
 
+                // Fetch country prices for each webinar
+                try
+                {
+                    var allCountryPrices = (await conn.QueryAsync<WebinarCountryPriceDto>(
+                        "wms.usp_GetAllWebinarCountryPrices",
+                        commandType: CommandType.StoredProcedure
+                    )).ToList();
+
+                    var groupedPrices = allCountryPrices
+                        .Where(p => p.WebinarId.HasValue)
+                        .GroupBy(p => p.WebinarId!.Value)
+                        .ToDictionary(g => g.Key, g => g.ToList());
+
+                    foreach (var w in list)
+                    {
+                        if (groupedPrices.TryGetValue(w.WebinarId, out var cpList))
+                        {
+                            w.CountryPrices = cpList;
+                            if (w.Price <= 0 && cpList.Count > 0)
+                            {
+                                w.Price = cpList[0].Amount;
+                            }
+                        }
+                    }
+                }
+                catch (Exception cpEx)
+                {
+                    _logger.LogWarning(cpEx, "[Webinar] GetPaymentsAsync: Failed to attach country prices.");
+                }
+
+                // Query country revenue breakdown
+                var countryRevenues = new List<DashboardCountryRevenueDto>();
+                try
+                {
+                    var cRevs = await conn.QueryAsync<DashboardCountryRevenueDto>(@"
+                        SELECT
+                            ISNULL(u.CountryCode, '+91') AS CountryCode,
+                            CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(wp.Amount, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmount,
+                            COUNT(CASE WHEN w.IsPaid = 1 THEN 1 END) AS RegistrationCount
+                        FROM wms.WebinarRegistrations wr
+                        JOIN wms.Webinars w ON w.Id = wr.WebinarId
+                        JOIN wms.Users u ON u.Id = wr.UserId
+                        LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = wr.WebinarId AND wp.CountryCode = u.CountryCode
+                        WHERE w.IsPaid = 1
+                        GROUP BY u.CountryCode
+                        ORDER BY TotalAmount DESC;
+                    ");
+                    countryRevenues = cRevs.ToList();
+                }
+                catch (Exception crEx)
+                {
+                    _logger.LogWarning(crEx, "[Webinar] GetPaymentsAsync: Failed to query country revenues.");
+                }
+
                 var summary = new PaymentsSummaryDto
                 {
                     TotalRevenue           = list.Sum(w => w.TotalAmount),
@@ -173,10 +356,12 @@ namespace WebinarApi.Services
                     TotalWebinars          = list.Count,
                     TotalPaidWebinars      = list.Count(w => w.IsPaid),
                     TotalFreeWebinars      = list.Count(w => !w.IsPaid),
+                    CountryRevenues        = countryRevenues,
                     Webinars               = list
                 };
 
-                _logger.LogInformation("[Webinar] GetPaymentsAsync returned {Count} records, TotalRevenue: {TotalRevenue}", list.Count, summary.TotalRevenue);
+                _logger.LogInformation("[Webinar] GetPaymentsAsync returned {Count} records, TotalRevenue: {TotalRevenue}, CountryCount: {CountryCount}",
+                    list.Count, summary.TotalRevenue, countryRevenues.Count);
                 return summary;
             }
             catch (Exception ex)
@@ -231,6 +416,14 @@ namespace WebinarApi.Services
                     new { ShareId = shareId.Trim() },
                     commandType: CommandType.StoredProcedure
                 );
+                if (webinar != null)
+                {
+                    webinar.CountryPrices = (await GetWebinarCountryPricesAsync(webinar.Id)).ToList();
+                    if ((webinar.Price == null || webinar.Price == 0) && webinar.CountryPrices.Any())
+                    {
+                        webinar.Price = webinar.CountryPrices.First().Amount;
+                    }
+                }
                 return webinar;
             }
             catch (Exception ex)
@@ -257,8 +450,15 @@ namespace WebinarApi.Services
                     return (false, "Duration must be greater than 0", null);
                 if (req.ParticipantLimit <= 0)
                     return (false, "Participant limit must be greater than 0", null);
-                if (req.IsPaid && (req.Price == null || req.Price <= 0))
-                    return (false, "Price must be greater than 0 for paid webinars", null);
+                if (req.IsPaid)
+                {
+                    if ((req.Price == null || req.Price <= 0) && req.CountryPrices != null && req.CountryPrices.Any(p => p.Amount > 0))
+                    {
+                        req.Price = req.CountryPrices.First(p => p.Amount > 0).Amount;
+                    }
+                    if (req.Price == null || req.Price <= 0)
+                        return (false, "Price must be greater than 0 for paid webinars", null);
+                }
 
                 var startOffset = DateTimeOffset.Parse(req.StartTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
                 var endOffset   = DateTimeOffset.Parse(req.EndTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
@@ -293,6 +493,12 @@ namespace WebinarApi.Services
                     commandType: CommandType.StoredProcedure
                 );
 
+                if (result != null && req.IsPaid && req.CountryPrices != null && req.CountryPrices.Count > 0)
+                {
+                    await SaveCountryPricesAsync(conn, result.Id, req.CountryPrices);
+                    result.CountryPrices = (await GetWebinarCountryPricesAsync(result.Id)).ToList();
+                }
+
                 _logger.LogInformation("[Webinar] Created — Id: {Id}, ShareId: {ShareId}", result?.Id, result?.ShareId);
                 return (true, "Webinar created successfully", result);
             }
@@ -325,8 +531,15 @@ namespace WebinarApi.Services
                     return (false, "Duration must be greater than 0", null);
                 if (req.ParticipantLimit <= 0)
                     return (false, "Participant limit must be greater than 0", null);
-                if (req.IsPaid && (req.Price == null || req.Price <= 0))
-                    return (false, "Price must be greater than 0 for paid webinars", null);
+                if (req.IsPaid)
+                {
+                    if ((req.Price == null || req.Price <= 0) && req.CountryPrices != null && req.CountryPrices.Any(p => p.Amount > 0))
+                    {
+                        req.Price = req.CountryPrices.First(p => p.Amount > 0).Amount;
+                    }
+                    if (req.Price == null || req.Price <= 0)
+                        return (false, "Price must be greater than 0 for paid webinars", null);
+                }
 
                 var startOffset = DateTimeOffset.Parse(req.StartTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
                 var endOffset   = DateTimeOffset.Parse(req.EndTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
@@ -363,6 +576,21 @@ namespace WebinarApi.Services
 
                 if (result == null)
                     return (false, "Webinar not found", null);
+
+                if (req.IsPaid && req.CountryPrices != null && req.CountryPrices.Count > 0)
+                {
+                    await SaveCountryPricesAsync(conn, id, req.CountryPrices);
+                    result.CountryPrices = (await GetWebinarCountryPricesAsync(id)).ToList();
+                }
+                else if (!req.IsPaid)
+                {
+                    await conn.ExecuteAsync(
+                        "wms.usp_DeleteWebinarCountryPrices",
+                        new { WebinarId = id },
+                        commandType: CommandType.StoredProcedure
+                    );
+                    result.CountryPrices = new List<WebinarCountryPriceDto>();
+                }
 
                 _logger.LogInformation("[Webinar] Updated — Id: {Id}", result.Id);
                 return (true, "Webinar updated successfully", result);
@@ -652,7 +880,7 @@ namespace WebinarApi.Services
             {
                 using var conn = new SqlConnection(_connectionString);
                 var user = await conn.QueryFirstOrDefaultAsync<dynamic>(
-                    "SELECT TOP 1 Id, FirstName, LastName, Email FROM wms.Users WHERE Email = @Email",
+                    "SELECT TOP 1 Id, FirstName, LastName, Email, CountryCode FROM wms.Users WHERE Email = @Email",
                     new { Email = email.Trim().ToLower() }
                 );
 
@@ -660,11 +888,12 @@ namespace WebinarApi.Services
                 {
                     return new CheckEmailResultDto
                     {
-                        Exists    = true,
-                        UserId    = (int)user.Id,
-                        FirstName = (string)user.FirstName,
-                        LastName  = (string?)user.LastName,
-                        Email     = (string)user.Email
+                        Exists      = true,
+                        UserId      = (int)user.Id,
+                        FirstName   = (string)user.FirstName,
+                        LastName    = (string?)user.LastName,
+                        Email       = (string)user.Email,
+                        CountryCode = (string?)user.CountryCode
                     };
                 }
 

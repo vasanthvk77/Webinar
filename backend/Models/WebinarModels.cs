@@ -1,6 +1,17 @@
 namespace WebinarApi.Models;
 
 // -------------------------------------------------------
+// DTO: Webinar Country-Specific Price (wms.WebinarPayments)
+// -------------------------------------------------------
+public class WebinarCountryPriceDto
+{
+    public long?   Id          { get; set; }
+    public long?   WebinarId   { get; set; }
+    public string  CountryCode { get; set; } = string.Empty;
+    public double  Amount      { get; set; }
+}
+
+// -------------------------------------------------------
 // Request: Create a new Webinar
 // -------------------------------------------------------
 public class CreateWebinarRequest
@@ -17,6 +28,7 @@ public class CreateWebinarRequest
     public int      ParticipantLimit { get; set; }
     public bool     IsPaid           { get; set; }
     public double?  Price            { get; set; }
+    public List<WebinarCountryPriceDto>? CountryPrices { get; set; }
     public string?  ShareId          { get; set; }
     public int?     CertificateTempId { get; set; }
     public string?  ImageUrl         { get; set; }
@@ -39,6 +51,7 @@ public class UpdateWebinarRequest
     public int      ParticipantLimit { get; set; }
     public bool     IsPaid           { get; set; }
     public double?  Price            { get; set; }
+    public List<WebinarCountryPriceDto>? CountryPrices { get; set; }
     public int?     CertificateTempId { get; set; }
     public string?  ImageUrl         { get; set; }
 }
@@ -63,6 +76,7 @@ public class WebinarDto
     public int       ParticipantLimit  { get; set; }
     public bool      IsPaid            { get; set; }
     public double?   Price             { get; set; }
+    public List<WebinarCountryPriceDto> CountryPrices { get; set; } = new();
     public string    ShareId           { get; set; } = string.Empty;
     public int?      CertificateTempId { get; set; }
     public string?   CertificateTemplateName { get; set; }
@@ -128,11 +142,12 @@ public class CheckEmailRequest
 
 public class CheckEmailResultDto
 {
-    public bool    Exists    { get; set; }
-    public int?    UserId    { get; set; }
-    public string? FirstName { get; set; }
-    public string? LastName  { get; set; }
-    public string? Email     { get; set; }
+    public bool    Exists      { get; set; }
+    public int?    UserId      { get; set; }
+    public string? FirstName   { get; set; }
+    public string? LastName    { get; set; }
+    public string? Email       { get; set; }
+    public string? CountryCode { get; set; }
 }
 
 // -------------------------------------------------------
@@ -268,6 +283,7 @@ public class WebinarPaymentDto
     public DateTime  CreatedAt         { get; set; }
     public int       RegistrationCount { get; set; }
     public double    TotalAmount       { get; set; }
+    public List<WebinarCountryPriceDto> CountryPrices { get; set; } = new();
 }
 
 public class PaymentsSummaryDto
@@ -278,6 +294,7 @@ public class PaymentsSummaryDto
     public int                            TotalWebinars          { get; set; }
     public int                            TotalPaidWebinars      { get; set; }
     public int                            TotalFreeWebinars      { get; set; }
+    public List<DashboardCountryRevenueDto> CountryRevenues      { get; set; } = new();
     public IEnumerable<WebinarPaymentDto> Webinars               { get; set; } = new List<WebinarPaymentDto>();
 }
 

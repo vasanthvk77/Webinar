@@ -69,6 +69,13 @@ public class DashboardService : IDashboardService
                 response.MonthlyTrends = trends.ToList();
             }
 
+            // 6. Country Revenue Breakdown
+            if (!multi.IsConsumed)
+            {
+                var countryRevenues = await multi.ReadAsync<DashboardCountryRevenueDto>();
+                response.CountryRevenues = countryRevenues.ToList();
+            }
+
             // Fallback safety for TotalRevenue & TopAttendedStudent if SP wasn't updated yet
             if (response.Summary.TotalRevenue <= 0 && response.Summary.EstimatedRevenue > 0)
             {

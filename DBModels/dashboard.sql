@@ -61,12 +61,18 @@ BEGIN
         -- General Metrics
         (SELECT COUNT(1) FROM wms.WebinarRegistrations) AS TotalRegistrations,
         (SELECT COUNT(1) FROM wms.WebinarCategories) AS TotalCategories,
-        (SELECT ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END), 0.0) 
+        (SELECT CAST(ISNULL(SUM(ISNULL(wp.Amount, 0.0)), 0.0) AS FLOAT) 
          FROM wms.WebinarRegistrations wr 
-         JOIN wms.Webinars w ON w.Id = wr.WebinarId) AS TotalRevenue,
-        (SELECT ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END), 0.0) 
+         JOIN wms.Webinars w ON w.Id = wr.WebinarId
+         JOIN wms.Users u ON u.Id = wr.UserId
+         LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = wr.WebinarId AND wp.CountryCode = u.CountryCode
+         WHERE w.IsPaid = 1) AS TotalRevenue,
+        (SELECT CAST(ISNULL(SUM(ISNULL(wp.Amount, 0.0)), 0.0) AS FLOAT) 
          FROM wms.WebinarRegistrations wr 
-         JOIN wms.Webinars w ON w.Id = wr.WebinarId) AS EstimatedRevenue,
+         JOIN wms.Webinars w ON w.Id = wr.WebinarId
+         JOIN wms.Users u ON u.Id = wr.UserId
+         LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = wr.WebinarId AND wp.CountryCode = u.CountryCode
+         WHERE w.IsPaid = 1) AS EstimatedRevenue,
         (SELECT TOP 1 LTRIM(RTRIM(ISNULL(u.FirstName, '') + ' ' + ISNULL(u.LastName, '')))
          FROM wms.WebinarCompleted wc
          INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
@@ -163,6 +169,21 @@ BEGIN
     GROUP BY FORMAT(wr.CreatedDateTime, 'yyyy-MM'), 
              DATENAME(month, wr.CreatedDateTime) + ' ' + CAST(YEAR(wr.CreatedDateTime) AS VARCHAR(4))
     ORDER BY [MonthKey] ASC;
+
+    -- ─────────────────────────────────────────────────────────────
+    -- 6. COUNTRY REVENUE BREAKDOWN
+    -- ─────────────────────────────────────────────────────────────
+    SELECT
+        ISNULL(u.CountryCode, '+91') AS CountryCode,
+        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(wp.Amount, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmount,
+        COUNT(CASE WHEN w.IsPaid = 1 THEN 1 END) AS RegistrationCount
+    FROM wms.WebinarRegistrations wr
+    JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    JOIN wms.Users u ON u.Id = wr.UserId
+    LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = wr.WebinarId AND wp.CountryCode = u.CountryCode
+    WHERE w.IsPaid = 1
+    GROUP BY u.CountryCode
+    ORDER BY TotalAmount DESC;
 END
 GO
 
@@ -199,6 +220,12 @@ BEGIN
         RETURN;
     END
 
+    -- Resolve Student Country Code
+    DECLARE @StudentCountryCode VARCHAR(10) = NULL;
+    SELECT TOP 1 @StudentCountryCode = CountryCode FROM wms.Users WHERE Id = @StudentId;
+    IF @StudentCountryCode IS NULL OR LTRIM(RTRIM(@StudentCountryCode)) = ''
+        SET @StudentCountryCode = '+91';
+
     -- ─────────────────────────────────────────────────────────────
     -- 1. SUMMARY KPI METRICS (Single Row)
     -- ─────────────────────────────────────────────────────────────
@@ -206,8 +233,8 @@ BEGIN
         COUNT(wr.Id) AS TotalRegistrations,
         ISNULL(SUM(CASE WHEN w.IsPaid = 0 THEN 1 ELSE 0 END), 0) AS FreeRegistrations,
         ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN 1 ELSE 0 END), 0) AS PaidRegistrations,
-        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmountPaid,
-        ISNULL((SELECT TOP 1 CountryCode FROM wms.Users WHERE Id = @StudentId), '+91') AS CountryCode,
+        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(wp.Amount, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmountPaid,
+        @StudentCountryCode AS CountryCode,
         ISNULL(SUM(CASE WHEN wc.IsAttended = 1 THEN 1 ELSE 0 END), 0) AS CompletedWebinars,
         ISNULL(SUM(CASE WHEN w.IsCompleted = 0 AND w.EndTime >= SYSUTCDATETIME() AND (wc.IsAttended IS NULL OR wc.IsAttended = 0) THEN 1 ELSE 0 END), 0) AS UpcomingWebinars,
         ISNULL(SUM(CASE WHEN wc.IsCertificateEligible = 1 THEN 1 ELSE 0 END), 0) AS CertificatesCount,
@@ -224,6 +251,7 @@ BEGIN
     FROM wms.WebinarRegistrations wr
     INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
     LEFT JOIN wms.WebinarCompleted wc ON wc.WebinarRegisterId = wr.Id
+    LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
     WHERE wr.UserId = @StudentId;
 
     -- ─────────────────────────────────────────────────────────────
@@ -247,7 +275,7 @@ BEGIN
             w.ConductorName,
             w.ConductorEmail,
             w.IsPaid,
-            w.Price,
+            ISNULL(wp.Amount, 0.0) AS Price,
             w.ShareId,
             w.IsMeetingCreated,
             ISNULL(w.IsCompleted, 0) AS IsCompleted,
@@ -272,6 +300,7 @@ BEGIN
         LEFT JOIN wms.Meetings m ON m.WebinarId = w.Id
         LEFT JOIN wms.AttendeeMeetingLinks aml ON aml.MeetingId = m.Id AND aml.WebinarRegistrationId = wr.Id
         LEFT JOIN wms.WebinarCompleted wc ON wc.WebinarRegisterId = wr.Id
+        LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
         WHERE wr.UserId = @StudentId 
           AND w.EndTime >= SYSUTCDATETIME()
           AND ISNULL(w.IsCompleted, 0) = 0
@@ -292,7 +321,7 @@ BEGIN
             w.ConductorName,
             w.ConductorEmail,
             w.IsPaid,
-            w.Price,
+            ISNULL(wp.Amount, 0.0) AS Price,
             w.ShareId,
             w.IsMeetingCreated,
             CAST(1 AS BIT) AS IsCompleted,
@@ -312,6 +341,7 @@ BEGIN
         INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
         INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
         INNER JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+        LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
         WHERE wr.UserId = @StudentId
           AND wc.IsAttended = 1
         ORDER BY ISNULL(wc.CreatedAt, wr.CreatedDateTime) DESC
@@ -331,7 +361,7 @@ BEGIN
             w.ConductorName,
             w.ConductorEmail,
             w.IsPaid,
-            w.Price,
+            ISNULL(wp.Amount, 0.0) AS Price,
             w.ShareId,
             w.IsMeetingCreated,
             ISNULL(w.IsCompleted, 0) AS IsCompleted,
@@ -349,6 +379,7 @@ BEGIN
             w.StartTime AS SortTime
         FROM wms.Webinars w
         INNER JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+        LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
         WHERE w.EndTime >= SYSUTCDATETIME()
           AND ISNULL(w.IsCompleted, 0) = 0
           AND NOT EXISTS (

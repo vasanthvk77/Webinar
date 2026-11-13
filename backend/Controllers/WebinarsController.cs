@@ -154,6 +154,28 @@ public class WebinarsController : ControllerBase
     }
 
     // -------------------------------------------------------
+    // GET /api/webinars/country-codes — Distinct user country codes
+    // -------------------------------------------------------
+    [HttpGet("country-codes")]
+    public async Task<IActionResult> GetDistinctCountryCodes()
+    {
+        _logger.LogInformation("[WebinarsController] GET /api/webinars/country-codes");
+        var codes = await _webinarService.GetDistinctUserCountryCodesAsync();
+        return Ok(new { success = true, data = codes });
+    }
+
+    // -------------------------------------------------------
+    // GET /api/webinars/{id:long}/prices — Country pricing for a webinar
+    // -------------------------------------------------------
+    [HttpGet("{id:long}/prices")]
+    public async Task<IActionResult> GetWebinarPrices(long id)
+    {
+        _logger.LogInformation("[WebinarsController] GET /api/webinars/{Id}/prices", id);
+        var prices = await _webinarService.GetWebinarCountryPricesAsync(id);
+        return Ok(new { success = true, data = prices });
+    }
+
+    // -------------------------------------------------------
     // GET /api/webinars/{id}/certificate/download — Condition 3: Certificate Download
     // Strict Verification: Checks if student is eligible for certificate before streaming PDF
     // -------------------------------------------------------

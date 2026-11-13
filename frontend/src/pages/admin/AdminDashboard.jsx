@@ -28,6 +28,11 @@ import {
   formatUtcToLocalDateOnly,
   formatUtcToLocalTimeOnly
 } from '../../utils/validation';
+import {
+  getCountryNameFromCode,
+  getCurrencySymbolFromCountryCode,
+  getCountryFromCode
+} from '../../utils/countryUtils';
 
 // ── Brand palette ────────────────────────────────────────────
 const GOLD = '#eab308';
@@ -46,7 +51,7 @@ const fmtDuration = (seconds) => {
 };
 
 // ── Professional Stat Tile Component (Unified, Executive Look) ──
-function StatTile({ icon, label, value, sub, loading, colors, onClick }) {
+function StatTile({ icon, label, value, sub, breakdown, customBody, loading, colors, onClick }) {
   const isStringVal = typeof value === 'string';
   const isLongVal = isStringVal && value.length > 12;
 
@@ -98,6 +103,8 @@ function StatTile({ icon, label, value, sub, loading, colors, onClick }) {
       <Box sx={{ mt: 1, minWidth: 0 }}>
         {loading ? (
           <Skeleton width={68} height={40} />
+        ) : customBody ? (
+          customBody
         ) : (
           <Tooltip title={isStringVal ? value : ''} arrow disableHoverListener={!isLongVal}>
             <Typography
@@ -119,6 +126,7 @@ function StatTile({ icon, label, value, sub, loading, colors, onClick }) {
             {sub}
           </Typography>
         )}
+        {!loading && breakdown}
       </Box>
     </Box>
   );
@@ -153,7 +161,8 @@ export default function AdminDashboard() {
   const [extraMetrics, setExtraMetrics] = useState({
     totalRevenue: 0,
     topStudentName: '',
-    topStudentCount: 0
+    topStudentCount: 0,
+    countryRevenues: []
   });
 
   // ── Fetch Dashboard Data from wms.sp_AdminDashboard & Supporting APIs ──
@@ -195,10 +204,18 @@ export default function AdminDashboard() {
         }
       }
 
+      // 3. Resolve Country Revenues (from Dashboard stats OR Payments SP)
+      const cRevs = (stats?.countryRevenues && stats.countryRevenues.length > 0)
+        ? stats.countryRevenues
+        : (paymentsRes.status === 'fulfilled' && paymentsRes.value.data?.success && paymentsRes.value.data.data?.countryRevenues?.length > 0
+            ? paymentsRes.value.data.data.countryRevenues
+            : []);
+
       setExtraMetrics({
         totalRevenue: revenue,
         topStudentName: topName,
-        topStudentCount: topCount
+        topStudentCount: topCount,
+        countryRevenues: cRevs
       });
 
       setLastUpdated(new Date());
@@ -217,6 +234,9 @@ export default function AdminDashboard() {
   }, [loadDashboardData]);
 
   const summary = data?.summary || {};
+  const countryRevenues = (extraMetrics.countryRevenues && extraMetrics.countryRevenues.length > 0)
+    ? extraMetrics.countryRevenues
+    : (data?.countryRevenues || []);
   const recentWebinars = data?.recentWebinars || [];
   const recentParticipants = data?.recentParticipants || [];
 
@@ -255,8 +275,55 @@ export default function AdminDashboard() {
 
   const tiles = [
     {
-      label: 'Total Revenue',
-      value: `₹${Number(extraMetrics.totalRevenue || 0).toLocaleString('en-IN')}`,
+      label: 'Revenue by Country',
+      customBody: countryRevenues.length > 0 ? (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6, my: 0.5 }}>
+          {countryRevenues.map((cr) => {
+            const flag = getCountryFromCode(cr.countryCode)?.flag || '🌐';
+            const symbol = getCurrencySymbolFromCountryCode(cr.countryCode);
+            const name = getCountryNameFromCode(cr.countryCode);
+            return (
+              <Tooltip
+                key={cr.countryCode}
+                title={`${name} (${cr.countryCode}): ${symbol}${Number(cr.totalAmount).toLocaleString('en-IN')} across ${cr.registrationCount} paid enrollments`}
+                arrow
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                  <Typography
+                    noWrap
+                    sx={{
+                      fontSize: '12.5px',
+                      fontWeight: 650,
+                      color: colors.textSecondary,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.6
+                    }}
+                  >
+                    <span style={{ fontSize: '15px' }}>{flag}</span>
+                    {name}
+                  </Typography>
+                  <Typography
+                    sx={{
+                      fontSize: countryRevenues.length === 1 ? '24px' : '18px',
+                      fontWeight: 850,
+                      color: colors.primary,
+                      letterSpacing: '-0.4px',
+                      lineHeight: 1.15
+                    }}
+                  >
+                    {symbol}{Number(cr.totalAmount || 0).toLocaleString('en-IN')}
+                  </Typography>
+                </Box>
+              </Tooltip>
+            );
+          })}
+        </Box>
+      ) : (
+        <Typography sx={{ fontSize: '20px', fontWeight: 800, color: colors.textMuted, my: 0.6 }}>
+          No Revenue Yet
+        </Typography>
+      ),
       sub: `${summary.paidWebinars ?? 0} paid sessions monetized`,
       icon: <PaymentsIcon sx={{ fontSize: 20 }} />,
       onClick: () => navigate('/admin/payments')
@@ -413,28 +480,86 @@ export default function AdminDashboard() {
 
             {/* Quick telemetry indicators */}
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
-              <Box
-                onClick={() => navigate('/admin/payments')}
-                sx={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 0.6,
-                  px: 1.25,
-                  py: 0.45,
-                  borderRadius: '999px',
-                  bgcolor: colors.surfaceAlt || '#f8fafc',
-                  border: `1px solid ${colors.border}`,
-                  color: colors.primary,
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  '&:hover': { borderColor: GOLD, bgcolor: GOLD_SOFT }
+              <Tooltip
+                title={
+                  countryRevenues.length > 0 ? (
+                    <Box sx={{ p: 0.5 }}>
+                      <Typography sx={{ fontSize: '11px', fontWeight: 800, mb: 0.75, color: '#D97706', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                        Country Revenue Breakdown
+                      </Typography>
+                      {countryRevenues.map((cr) => {
+                        const flag = getCountryFromCode(cr.countryCode)?.flag || '🌐';
+                        const symbol = getCurrencySymbolFromCountryCode(cr.countryCode);
+                        const name = getCountryNameFromCode(cr.countryCode);
+                        return (
+                          <Typography key={cr.countryCode} sx={{ fontSize: '12px', fontWeight: 600, py: 0.3, color: colors.primary, display: 'flex', alignItems: 'center', gap: 0.6 }}>
+                            <span style={{ fontSize: '14px' }}>{flag}</span> {name} ({cr.countryCode}): <strong>{symbol}{Number(cr.totalAmount).toLocaleString('en-IN')}</strong> ({cr.registrationCount} paid)
+                          </Typography>
+                        );
+                      })}
+                    </Box>
+                  ) : ''
+                }
+                arrow
+                slotProps={{
+                  tooltip: {
+                    sx: {
+                      bgcolor: colors.surface,
+                      color: colors.primary,
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12), 0 8px 10px -6px rgba(0,0,0,0.08)',
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: '10px',
+                      p: 1.25,
+                      minWidth: 220
+                    }
+                  },
+                  arrow: {
+                    sx: {
+                      color: colors.surface,
+                      '&::before': {
+                        border: `1px solid ${colors.border}`
+                      }
+                    }
+                  }
                 }}
+                disableHoverListener={countryRevenues.length === 0}
               >
-                <PaymentsIcon sx={{ fontSize: 14, color: GOLD_DEEP }} />
-                ₹{Number(extraMetrics.totalRevenue || 0).toLocaleString('en-IN')} revenue
-              </Box>
+                <Box
+                  onClick={() => navigate('/admin/payments')}
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.6,
+                    px: 1.25,
+                    py: 0.45,
+                    borderRadius: '999px',
+                    bgcolor: colors.surfaceAlt || '#f8fafc',
+                    border: `1px solid ${colors.border}`,
+                    color: colors.primary,
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    '&:hover': { borderColor: GOLD, bgcolor: GOLD_SOFT }
+                  }}
+                >
+                  <PaymentsIcon sx={{ fontSize: 14, color: GOLD_DEEP }} />
+                  {countryRevenues.length > 0 ? (
+                    countryRevenues.map((cr, idx) => {
+                      const flag = getCountryFromCode(cr.countryCode)?.flag || '🌐';
+                      const symbol = getCurrencySymbolFromCountryCode(cr.countryCode);
+                      return (
+                        <span key={cr.countryCode} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          {idx > 0 && <span style={{ opacity: 0.4, margin: '0 4px' }}>•</span>}
+                          {flag} {symbol}{Number(cr.totalAmount).toLocaleString('en-IN')}
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span>Revenue by Country</span>
+                  )}
+                </Box>
+              </Tooltip>
 
               {extraMetrics.topStudentName && (
                 <Box

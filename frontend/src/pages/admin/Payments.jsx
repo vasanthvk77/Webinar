@@ -20,6 +20,12 @@ import { useThemeColors, useAppTheme } from '../../context/ThemeContext';
 import CustomSearchBar       from '../../components/CustomSearchBar';
 import CustomPagination      from '../../components/CustomPagination';
 import { formatUtcToLocalDateOnly, formatUtcToLocalTimeOnly } from '../../utils/validation';
+import {
+  getCountryNameFromCode,
+  getCurrencySymbolFromCountryCode,
+  getCountryFromCode,
+  getFlagEmoji
+} from '../../utils/countryUtils';
 
 // Helper: Format Currency (INR standard: ₹)
 const formatCurrency = (amount) => {
@@ -254,13 +260,34 @@ export default function Payments() {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box>
                   <Typography variant="caption" sx={{ color: '#D97706', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
-                    Total Revenue
+                    Revenue by Country
                   </Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 850, color: colors.textPrimary, mt: 0.5, letterSpacing: '-0.02em' }}>
-                    {formatCurrency(summaryData.totalRevenue)}
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11.5px', mt: 0.3, display: 'block' }}>
-                    From {summaryData.totalPaidRegistrations} paid enrolments
+                  {summaryData.countryRevenues && summaryData.countryRevenues.length > 0 ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 0.6 }}>
+                      {summaryData.countryRevenues.map((cr) => {
+                        const flag = getCountryFromCode(cr.countryCode)?.flag || '🌐';
+                        const symbol = getCurrencySymbolFromCountryCode(cr.countryCode);
+                        const name = getCountryNameFromCode(cr.countryCode);
+                        return (
+                          <Box key={cr.countryCode} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                            <span style={{ fontSize: '15px' }}>{flag}</span>
+                            <Typography sx={{ fontSize: '16px', fontWeight: 850, color: colors.textPrimary, letterSpacing: '-0.3px' }}>
+                              {symbol}{Number(cr.totalAmount || 0).toLocaleString('en-IN')}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11px' }}>
+                              ({name})
+                            </Typography>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  ) : (
+                    <Typography variant="h5" sx={{ fontWeight: 850, color: colors.textMuted, mt: 0.5 }}>
+                      No Revenue
+                    </Typography>
+                  )}
+                  <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11.5px', mt: 0.5, display: 'block' }}>
+                    From {summaryData.totalPaidRegistrations || 0} paid enrolments
                   </Typography>
                 </Box>
                 <Avatar sx={{ bgcolor: 'rgba(217, 119, 6, 0.16)', color: '#D97706', width: 46, height: 46 }}>
@@ -554,17 +581,86 @@ export default function Payments() {
                       <TableCell align="center" sx={{ py: 2 }}>
                         {isPaid ? (
                           <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
-                            <Chip
-                              label={`Paid · ${formatCurrency(price)}`}
-                              size="small"
-                              sx={{
-                                bgcolor: isDark ? 'rgba(217, 119, 6, 0.16)' : '#FEF3C7',
-                                color: '#D97706',
-                                fontWeight: 800,
-                                fontSize: '12px',
-                                border: '1px solid rgba(217, 119, 6, 0.28)'
-                              }}
-                            />
+                            {w.countryPrices && w.countryPrices.length > 0 ? (
+                              <Tooltip
+                                title={
+                                  <Box sx={{ p: 0.5 }}>
+                                    <Typography sx={{ fontSize: '11px', fontWeight: 800, color: '#D97706', mb: 0.75, letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+                                      Country Pricing
+                                    </Typography>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.6 }}>
+                                      {w.countryPrices.map((cp) => {
+                                        const cName = getCountryNameFromCode(cp.countryCode);
+                                        const cObj = getCountryFromCode(cp.countryCode);
+                                        const flag = cObj?.flag || getFlagEmoji(cObj?.iso2) || '🌐';
+                                        const sym = getCurrencySymbolFromCountryCode(cp.countryCode);
+                                        return (
+                                          <Box key={cp.countryCode} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
+                                            <Typography sx={{ fontSize: '12px', fontWeight: 600, color: colors.textSecondary, display: 'flex', alignItems: 'center', gap: 0.6 }}>
+                                              <span style={{ fontSize: '14px' }}>{flag}</span> {cName} ({cp.countryCode})
+                                            </Typography>
+                                            <Typography sx={{ fontSize: '12.5px', fontWeight: 800, color: colors.textPrimary }}>
+                                              {sym}{cp.amount}
+                                            </Typography>
+                                          </Box>
+                                        );
+                                      })}
+                                    </Box>
+                                  </Box>
+                                }
+                                arrow
+                                slotProps={{
+                                  tooltip: {
+                                    sx: {
+                                      bgcolor: isDark ? '#1e293b' : '#ffffff',
+                                      color: colors.textPrimary,
+                                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.12), 0 8px 10px -6px rgba(0,0,0,0.08)',
+                                      border: `1px solid ${colors.border}`,
+                                      borderRadius: '10px',
+                                      p: 1.25,
+                                      minWidth: 200
+                                    }
+                                  },
+                                  arrow: {
+                                    sx: {
+                                      color: isDark ? '#1e293b' : '#ffffff',
+                                      '&::before': {
+                                        border: `1px solid ${colors.border}`
+                                      }
+                                    }
+                                  }
+                                }}
+                              >
+                                <Chip
+                                  label={
+                                    w.countryPrices.length === 1
+                                      ? `Paid · ${getCurrencySymbolFromCountryCode(w.countryPrices[0].countryCode)}${w.countryPrices[0].amount}`
+                                      : `Paid · ${getCurrencySymbolFromCountryCode(w.countryPrices[0].countryCode)}${w.countryPrices[0].amount} (+${w.countryPrices.length - 1})`
+                                  }
+                                  size="small"
+                                  sx={{
+                                    bgcolor: isDark ? 'rgba(217, 119, 6, 0.16)' : '#FEF3C7',
+                                    color: '#D97706',
+                                    fontWeight: 800,
+                                    fontSize: '12px',
+                                    border: '1px solid rgba(217, 119, 6, 0.28)',
+                                    cursor: 'pointer'
+                                  }}
+                                />
+                              </Tooltip>
+                            ) : (
+                              <Chip
+                                label={price > 0 ? `Paid · ${formatCurrency(price)}` : 'Paid'}
+                                size="small"
+                                sx={{
+                                  bgcolor: isDark ? 'rgba(217, 119, 6, 0.16)' : '#FEF3C7',
+                                  color: '#D97706',
+                                  fontWeight: 800,
+                                  fontSize: '12px',
+                                  border: '1px solid rgba(217, 119, 6, 0.28)'
+                                }}
+                              />
+                            )}
                             <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11px', mt: 0.4 }}>
                               per seat
                             </Typography>
@@ -606,7 +702,7 @@ export default function Payments() {
                           </Typography>
                           {isPaid && regCount > 0 && (
                             <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11px' }}>
-                              {regCount} × {formatCurrency(price)}
+                              {regCount} {regCount === 1 ? 'paid enrollment' : 'paid enrollments'}
                             </Typography>
                           )}
                         </Box>

@@ -350,6 +350,51 @@ END
 GO
 
 -- ============================================================
+-- TABLE: wms.WebinarPayments
+-- Multi-country dynamic localized pricing per webinar
+-- ============================================================
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'WebinarPayments' AND s.name = 'wms'
+)
+BEGIN
+    CREATE TABLE wms.WebinarPayments
+    (
+        Id          BIGINT IDENTITY(1,1) PRIMARY KEY,
+        WebinarId   BIGINT NOT NULL
+            CONSTRAINT FK_WebinarPayments_Webinars
+                FOREIGN KEY REFERENCES wms.Webinars(Id) ON DELETE CASCADE,
+        CountryCode VARCHAR(10) NOT NULL,
+        Amount      FLOAT NOT NULL,
+        CreatedAt   DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        UpdatedAt   DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+
+        CONSTRAINT UQ_WebinarPayments_Webinar_Country UNIQUE (WebinarId, CountryCode)
+    );
+
+    CREATE INDEX IX_WebinarPayments_WebinarId ON wms.WebinarPayments(WebinarId);
+    CREATE INDEX IX_WebinarPayments_CountryCode ON wms.WebinarPayments(CountryCode);
+END
+GO
+
+-- Migration: Backfill existing paid webinars into wms.WebinarPayments if not present
+INSERT INTO wms.WebinarPayments (WebinarId, CountryCode, Amount, CreatedAt, UpdatedAt)
+SELECT w.Id, '+91', w.Price, SYSUTCDATETIME(), SYSUTCDATETIME()
+FROM wms.Webinars w
+WHERE w.IsPaid = 1 
+  AND w.Price IS NOT NULL 
+  AND w.Price > 0
+  AND NOT EXISTS (
+      SELECT 1 FROM wms.WebinarPayments wp 
+      WHERE wp.WebinarId = w.Id AND wp.CountryCode = '+91'
+  );
+
+-- Clear Price column in wms.Webinars so it is never used or stored
+UPDATE wms.Webinars SET Price = NULL WHERE Price IS NOT NULL;
+GO
+
+-- ============================================================
 -- SP: wms.usp_GetAllWebinars
 -- Used by : WebinarsController GET /api/webinars
 -- ============================================================
@@ -376,7 +421,7 @@ BEGIN
         w.ConductorEmail,
         w.ParticipantLimit,
         w.IsPaid,
-        w.Price,
+        ISNULL((SELECT TOP 1 wp.Amount FROM wms.WebinarPayments wp WHERE wp.WebinarId = w.Id), 0.0) AS Price,
         w.ShareId,
         w.CertificateTempId,
         ct.CertificateName AS CertificateTemplateName,
@@ -387,7 +432,13 @@ BEGIN
         w.UpdatedBy,
         uu.FirstName + ISNULL(' ' + uu.LastName, '') AS UpdatedByName,
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
-        CAST((SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount,
+        CAST(ISNULL((
+            SELECT SUM(ISNULL(wp.Amount, 0.0))
+            FROM wms.WebinarRegistrations wr
+            JOIN wms.Users u ON u.Id = wr.UserId
+            LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = wr.WebinarId AND wp.CountryCode = u.CountryCode
+            WHERE wr.WebinarId = w.Id AND w.IsPaid = 1
+        ), 0.0) AS FLOAT) AS TotalAmount,
         w.IsMeetingCreated,
         w.IsCompleted,
         w.ModeratorJoinUrl,
@@ -431,12 +482,12 @@ BEGIN
         w.ConductorEmail,
         w.ParticipantLimit,
         w.IsPaid,
-        w.Price,
+        CAST(COALESCE((SELECT TOP 1 wp.Amount FROM wms.WebinarPayments wp WHERE wp.WebinarId = w.Id ORDER BY wp.Id ASC), 0.0) AS FLOAT) AS Price,
         w.ShareId,
         w.CertificateTempId,
         ct.CertificateName AS CertificateTemplateName,
         (SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) AS RegistrationCount,
-        CAST((SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount,
+        CAST((SELECT COUNT(1) FROM wms.WebinarRegistrations wr WHERE wr.WebinarId = w.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL((SELECT TOP 1 wp.Amount FROM wms.WebinarPayments wp WHERE wp.WebinarId = w.Id ORDER BY wp.Id ASC), 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount,
         w.IsMeetingCreated,
         w.IsCompleted,
         w.ModeratorJoinUrl,
@@ -470,7 +521,7 @@ CREATE PROCEDURE wms.usp_CreateWebinar
     @ConductorEmail   NVARCHAR(254),
     @ParticipantLimit INT,
     @IsPaid           BIT,
-    @Price            FLOAT,
+    @Price            FLOAT = NULL,
     @CreatedBy        INT,
     @ShareId          NVARCHAR(64) = NULL,
     @CertificateTempId INT = NULL,
@@ -491,12 +542,6 @@ BEGIN
         RETURN;
     END
 
-    IF @IsPaid = 1 AND (@Price IS NULL OR @Price <= 0)
-    BEGIN
-        RAISERROR('Price must be greater than 0 for paid webinars.', 16, 1);
-        RETURN;
-    END
-
     IF @ShareId IS NULL OR LEN(LTRIM(RTRIM(@ShareId))) = 0
         SET @ShareId = LOWER(CONVERT(NVARCHAR(36), NEWID()));
 
@@ -507,7 +552,7 @@ BEGIN
     VALUES
         (@WebinarName, @CategoryId, @DurationMinutes, @WebinarDate, @StartTime, @EndTime,
          @ConductorName, @ConductorPhone, @ConductorEmail, @ParticipantLimit,
-         @IsPaid, CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END, @CreatedBy, @ShareId, @CertificateTempId, @ImageUrl);
+         @IsPaid, NULL, @CreatedBy, @ShareId, @CertificateTempId, @ImageUrl);
 
     DECLARE @NewId BIGINT = SCOPE_IDENTITY();
 
@@ -570,7 +615,7 @@ CREATE PROCEDURE wms.usp_UpdateWebinar
     @ConductorEmail   NVARCHAR(254),
     @ParticipantLimit INT,
     @IsPaid           BIT,
-    @Price            FLOAT,
+    @Price            FLOAT = NULL,
     @UpdatedBy        INT,
     @CertificateTempId INT = NULL,
     @ImageUrl         NVARCHAR(500) = NULL
@@ -596,12 +641,6 @@ BEGIN
         RETURN;
     END
 
-    IF @IsPaid = 1 AND (@Price IS NULL OR @Price <= 0)
-    BEGIN
-        RAISERROR('Price must be greater than 0 for paid webinars.', 16, 1);
-        RETURN;
-    END
-
     UPDATE wms.Webinars
     SET
         WebinarName       = @WebinarName,
@@ -615,7 +654,7 @@ BEGIN
         ConductorEmail    = @ConductorEmail,
         ParticipantLimit  = @ParticipantLimit,
         IsPaid            = @IsPaid,
-        Price             = CASE WHEN @IsPaid = 1 THEN @Price ELSE NULL END,
+        Price             = NULL,
         CertificateTempId = @CertificateTempId,
         ImageUrl          = @ImageUrl,
         UpdatedAt         = GETDATE(),
@@ -1129,6 +1168,13 @@ BEGIN
         RETURN;
     END
 
+    -- Resolve Student's CountryCode for dynamic localized pricing
+    DECLARE @StudentCountryCode VARCHAR(10) = NULL;
+    IF @StudentId IS NOT NULL AND @StudentId > 0
+    BEGIN
+        SELECT TOP 1 @StudentCountryCode = CountryCode FROM wms.Users WHERE Id = @StudentId;
+    END
+
     -- ─────────────────────────────────────────────────────────────
     -- CONDITION 1: UPCOMING / ALL WEBINARS
     -- Fetches all webinars created by admin from wms.Webinars.
@@ -1150,7 +1196,10 @@ BEGIN
             w.ConductorEmail,
             w.ParticipantLimit,
             w.IsPaid,
-            w.Price,
+            CASE 
+                WHEN w.IsPaid = 1 THEN COALESCE(wp.Amount, w.Price, 0.0)
+                ELSE NULL 
+            END AS Price,
             w.ShareId,
             w.CertificateTempId,
             ct.CertificateName AS CertificateTemplateName,
@@ -1169,6 +1218,7 @@ BEGIN
         LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
         LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
         LEFT JOIN wms.WebinarRegistrations wr ON wr.WebinarId = w.Id AND wr.UserId = @StudentId
+        LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
         WHERE w.EndTime >= SYSUTCDATETIME() AND w.IsCompleted = 0
         ORDER BY w.WebinarDate ASC, w.StartTime ASC;
 
@@ -1209,7 +1259,10 @@ BEGIN
             w.ConductorEmail,
             w.ParticipantLimit,
             w.IsPaid,
-            w.Price,
+            CASE 
+                WHEN w.IsPaid = 1 THEN COALESCE(wp.Amount, w.Price, 0.0)
+                ELSE NULL 
+            END AS Price,
             w.ShareId,
             w.CertificateTempId,
             ct.CertificateName AS CertificateTemplateName,
@@ -1228,6 +1281,7 @@ BEGIN
         JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
         LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
         LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
+        LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
         WHERE wr.UserId = @StudentId
         ORDER BY wr.CreatedDateTime DESC;
 
@@ -1340,7 +1394,10 @@ BEGIN
         w.ShareId,
         w.ImageUrl,
         w.IsPaid,
-        w.Price,
+        CASE 
+            WHEN w.IsPaid = 1 THEN COALESCE(wp.Amount, (SELECT TOP 1 wp2.Amount FROM wms.WebinarPayments wp2 WHERE wp2.WebinarId = w.Id ORDER BY wp2.Id ASC), 0.0)
+            ELSE NULL 
+        END AS Price,
         w.CertificateTempId,
         ct.CertificateName AS CertificateTemplateName,
         ct.TemplateImageUrl,
@@ -1370,6 +1427,7 @@ BEGIN
     INNER JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
     LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     INNER JOIN wms.Users u ON u.Id = wr.UserId
+    LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = u.CountryCode
     WHERE wr.UserId = @UserId
       AND wc.IsAttended = 1 -- Condition 2: Completed webinar
       AND (@WebinarId IS NULL OR w.Id = @WebinarId)
@@ -1556,17 +1614,19 @@ BEGIN
         w.EndTime,
         w.DurationMinutes,
         w.IsPaid,
-        ISNULL(w.Price, 0.0) AS Price,
+        ISNULL((SELECT TOP 1 wp_def.Amount FROM wms.WebinarPayments wp_def WHERE wp_def.WebinarId = w.Id ORDER BY wp_def.Id ASC), 0.0) AS Price,
         w.ParticipantLimit,
         w.ShareId,
         w.ImageUrl,
         w.IsCompleted,
         w.CreatedAt,
         COUNT(wr.Id) AS RegistrationCount,
-        CAST(COUNT(wr.Id) * (CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END) AS FLOAT) AS TotalAmount
+        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(wp.Amount, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmount
     FROM wms.Webinars w
     LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
     LEFT JOIN wms.WebinarRegistrations wr ON wr.WebinarId = w.Id
+    LEFT JOIN wms.Users u ON u.Id = wr.UserId
+    LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = u.CountryCode
     GROUP BY
         w.Id,
         w.WebinarName,
@@ -1578,7 +1638,6 @@ BEGIN
         w.EndTime,
         w.DurationMinutes,
         w.IsPaid,
-        w.Price,
         w.ParticipantLimit,
         w.ShareId,
         w.ImageUrl,
@@ -1619,13 +1678,14 @@ BEGIN
     SELECT 
         u.Id AS UserId,
         ISNULL(u.CountryCode, '+91') AS CountryCode,
-        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmountPaid,
+        CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(wp.Amount, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmountPaid,
         COUNT(CASE WHEN w.IsPaid = 1 THEN 1 END) AS TotalPaidWebinars,
         COUNT(CASE WHEN w.IsPaid = 0 THEN 1 END) AS TotalFreeWebinars,
         COUNT(wr.Id) AS TotalWebinars
     FROM wms.Users u
     LEFT JOIN wms.WebinarRegistrations wr ON wr.UserId = u.Id
     LEFT JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = u.CountryCode
     WHERE u.Id = @UserId
     GROUP BY u.Id, u.CountryCode;
 
@@ -1641,8 +1701,8 @@ BEGIN
         w.EndTime,
         w.DurationMinutes,
         w.IsPaid,
-        ISNULL(w.Price, 0.0) AS Price,
-        CAST(CASE WHEN w.IsPaid = 1 THEN ISNULL(w.Price, 0.0) ELSE 0.0 END AS FLOAT) AS AmountPaid,
+        ISNULL(wp.Amount, 0.0) AS Price,
+        CAST(CASE WHEN w.IsPaid = 1 THEN ISNULL(wp.Amount, 0.0) ELSE 0.0 END AS FLOAT) AS AmountPaid,
         w.ParticipantLimit,
         w.ShareId,
         w.ImageUrl,
@@ -1651,8 +1711,125 @@ BEGIN
     FROM wms.WebinarRegistrations wr
     INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
     LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    JOIN wms.Users u ON u.Id = wr.UserId
+    LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = u.CountryCode
     WHERE wr.UserId = @UserId
     ORDER BY wr.CreatedDateTime DESC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetDistinctUserCountryCodes
+-- Retrieves all distinct user country codes for dynamic localized pricing
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetDistinctUserCountryCodes' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetDistinctUserCountryCodes;
+GO
+
+CREATE PROCEDURE wms.usp_GetDistinctUserCountryCodes
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT DISTINCT LTRIM(RTRIM(CountryCode)) AS CountryCode
+    FROM wms.Users
+    WHERE CountryCode IS NOT NULL 
+      AND LTRIM(RTRIM(CountryCode)) <> ''
+    ORDER BY CountryCode ASC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetWebinarCountryPrices
+-- Retrieves country-specific pricing configured for a webinar
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetWebinarCountryPrices' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetWebinarCountryPrices;
+GO
+
+CREATE PROCEDURE wms.usp_GetWebinarCountryPrices
+    @WebinarId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        Id,
+        WebinarId,
+        CountryCode,
+        Amount
+    FROM wms.WebinarPayments
+    WHERE WebinarId = @WebinarId
+    ORDER BY CountryCode ASC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetAllWebinarCountryPrices
+-- Retrieves all country prices across all webinars
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetAllWebinarCountryPrices' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetAllWebinarCountryPrices;
+GO
+
+CREATE PROCEDURE wms.usp_GetAllWebinarCountryPrices
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        Id,
+        WebinarId,
+        CountryCode,
+        Amount
+    FROM wms.WebinarPayments
+    ORDER BY WebinarId ASC, CountryCode ASC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_SaveWebinarCountryPrice
+-- Inserts or updates country-specific price in wms.WebinarPayments
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_SaveWebinarCountryPrice' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_SaveWebinarCountryPrice;
+GO
+
+CREATE PROCEDURE wms.usp_SaveWebinarCountryPrice
+    @WebinarId   BIGINT,
+    @CountryCode VARCHAR(10),
+    @Amount      FLOAT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    MERGE wms.WebinarPayments AS target
+    USING (SELECT @WebinarId AS WebinarId, LTRIM(RTRIM(@CountryCode)) AS CountryCode, @Amount AS Amount) AS source
+    ON (target.WebinarId = source.WebinarId AND target.CountryCode = source.CountryCode)
+    WHEN MATCHED THEN
+        UPDATE SET target.Amount = source.Amount, target.UpdatedAt = SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN
+        INSERT (WebinarId, CountryCode, Amount, CreatedAt, UpdatedAt)
+        VALUES (source.WebinarId, source.CountryCode, source.Amount, SYSUTCDATETIME(), SYSUTCDATETIME());
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_DeleteWebinarCountryPrices
+-- Deletes all country pricing for a webinar (used before re-saving)
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_DeleteWebinarCountryPrices' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_DeleteWebinarCountryPrices;
+GO
+
+CREATE PROCEDURE wms.usp_DeleteWebinarCountryPrices
+    @WebinarId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM wms.WebinarPayments
+    WHERE WebinarId = @WebinarId;
 END
 GO
 
