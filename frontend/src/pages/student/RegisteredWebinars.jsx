@@ -15,7 +15,7 @@ import CheckCircleIcon      from '@mui/icons-material/CheckCircle';
 import ArrowForwardIcon     from '@mui/icons-material/ArrowForward';
 import SchoolIcon           from '@mui/icons-material/School';
 import toast                from 'react-hot-toast';
-import { webinarService }   from '../../services/api';
+import { webinarService, calendarService } from '../../services/api';
 import { useAuth }          from '../../context/AuthContext';
 import { useThemeColors }   from '../../context/ThemeContext';
 import CustomSearchBar      from '../../components/CustomSearchBar';
@@ -138,16 +138,55 @@ export default function RegisteredWebinars() {
   };
 
   // Add to Google Calendar
-  const handleAddToCalendar = (w) => {
+  const handleAddToCalendar = async (w) => {
+    const wid = w.id || w.webinarId;
+    if (!wid) {
+      toast.error('Session not found');
+      return;
+    }
+
     try {
-      const start = new Date(w.startTime).toISOString().replace(/-|:|\.\d\d\d/g, "");
-      const end = new Date(w.endTime).toISOString().replace(/-|:|\.\d\d\d/g, "");
-      const title = encodeURIComponent(w.webinarName);
-      const details = encodeURIComponent(`Webinar hosted by ${w.conductorName}.\nWebinar portal: ${window.location.origin}`);
-      const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${start}/${end}&details=${details}`;
-      window.open(gcalUrl, '_blank');
+      const toastId = toast.loading('Connecting to Google Calendar...');
+      const res = await calendarService.addEvent(wid, Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Event & reminders saved to your Google Calendar!', { id: toastId });
+        if (res.data.eventLink) {
+          window.open(res.data.eventLink, '_blank');
+        }
+      } else if (res.data?.requiresAuth && res.data.authUrl) {
+        toast.dismiss(toastId);
+        const width = 500;
+        const height = 650;
+        const left = window.screen.width / 2 - width / 2;
+        const top = window.screen.height / 2 - height / 2;
+        window.open(
+          res.data.authUrl,
+          'GoogleCalendarAuth',
+          `width=${width},height=${height},top=${top},left=${left}`
+        );
+
+        const handleMessage = (event) => {
+          if (event.data?.type === 'GOOGLE_CALENDAR_SUCCESS') {
+            toast.success('Google Calendar connected! Event has been added with your reminders.');
+            window.removeEventListener('message', handleMessage);
+          }
+        };
+        window.addEventListener('message', handleMessage);
+      } else {
+        toast.error(res.data?.message || 'Failed saving event to Google Calendar', { id: toastId });
+      }
     } catch {
-      toast.error('Could not generate calendar link');
+      try {
+        const start = new Date(w.startTime).toISOString().replace(/-|:|\.\d\d\d/g, "");
+        const end = new Date(w.endTime).toISOString().replace(/-|:|\.\d\d\d/g, "");
+        const title = encodeURIComponent(w.webinarName);
+        const details = encodeURIComponent(`Webinar hosted by ${w.conductorName}.\nWebinar portal: ${window.location.origin}`);
+        const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${start}/${end}&details=${details}`;
+        window.open(gcalUrl, '_blank');
+      } catch {
+        toast.error('Could not connect to Google Calendar');
+      }
     }
   };
 

@@ -25,7 +25,8 @@ public static class DBInitializer
         "../DBModels/certificatetemplates.sql",
         "../DBModels/webinars.sql",
         "../DBModels/Meeting.sql",
-        "../DBModels/dashboard.sql"
+        "../DBModels/dashboard.sql",
+        "../DBModels/googlecalendar.sql"
     };
 
     // Called from Program.cs on server startup

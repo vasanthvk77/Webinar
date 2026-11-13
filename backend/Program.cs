@@ -104,6 +104,9 @@ builder.Services.AddScoped<CertificateService>();
 builder.Services.AddScoped<ICertificateTemplateService, CertificateTemplateService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IStudentProfileService, StudentProfileService>();
+builder.Services.Configure<WebinarApi.Models.GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
+builder.Services.AddScoped<IGoogleCalendarService, GoogleCalendarService>();
+builder.Services.AddHttpClient();
 
 builder.Services.AddSignalR();
 builder.Services.AddHttpClient("BbbClient")

@@ -386,5 +386,18 @@ export const studentProfileService = {
     }),
 };
 
+// -------------------------------------------------------
+// Google Calendar — Student Webinar Event Integration
+// -------------------------------------------------------
+export const calendarService = {
+  // POST /api/calendar/add-event
+  addEvent: (webinarId, timeZone) =>
+    api.post('/api/calendar/add-event', { webinarId, timeZone }),
+
+  // GET /api/calendar/auth-url
+  getAuthUrl: (webinarId) =>
+    api.get('/api/calendar/auth-url', { params: { webinarId } }),
+};
+
 export default api;
 
