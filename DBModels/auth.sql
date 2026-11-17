@@ -155,6 +155,63 @@ BEGIN
 END
 GO
 
+-- Check if Year column exists, if not add it
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Users' AND s.name = 'wms' AND c.name = 'Year'
+)
+BEGIN
+    ALTER TABLE wms.Users
+    ADD [Year] NVARCHAR(50) NULL;
+    PRINT 'Column Year added to wms.Users';
+END
+ELSE
+BEGIN
+    PRINT 'Column Year already exists in wms.Users';
+END
+GO
+
+-- Check if Department column exists, if not add it
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Users' AND s.name = 'wms' AND c.name = 'Department'
+)
+BEGIN
+    ALTER TABLE wms.Users
+    ADD Department NVARCHAR(100) NULL;
+    PRINT 'Column Department added to wms.Users';
+END
+ELSE
+BEGIN
+    PRINT 'Column Department already exists in wms.Users';
+END
+GO
+
+-- Check if TimeZone column exists, if not add it
+IF NOT EXISTS (
+    SELECT 1 
+    FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'Users' AND s.name = 'wms' AND c.name = 'TimeZone'
+)
+BEGIN
+    ALTER TABLE wms.Users
+    ADD TimeZone NVARCHAR(100) NULL;
+    PRINT 'Column TimeZone added to wms.Users';
+END
+ELSE
+BEGIN
+    PRINT 'Column TimeZone already exists in wms.Users';
+END
+GO
+
 
 -- =============================================
 -- AUTH STORED PROCEDURES — v2
@@ -219,7 +276,7 @@ BEGIN
          RoleId, IsActive, EmailVerified, CountryCode, MobileNumber, CreatedAt)
     VALUES
         (@FirstName, @LastName, @Email, @PasswordHash, 'Local', NULL,
-         @RoleId, 1, 0, @CountryCode, @MobileNumber, GETUTCDATE());
+         @RoleId, 1, 1, @CountryCode, @MobileNumber, GETUTCDATE());
 
     SET @NewId = SCOPE_IDENTITY();
 
@@ -299,6 +356,8 @@ BEGIN
             ELSE 'Not Specified'
         END AS GenderName,
         u.ProfileUrl,
+        u.[Year],
+        u.Department,
         r.Name AS RoleName,
         u.CreatedAt,
         u.UpdatedAt
@@ -310,7 +369,7 @@ GO
 
 -- =============================================
 -- SP: wms.sp_UpdateStudentProfile
--- Purpose : Updates profile data (FirstName, LastName, MobileNumber, CountryCode, Gender, ProfileUrl)
+-- Purpose : Updates profile data (FirstName, LastName, MobileNumber, CountryCode, Gender, ProfileUrl, Year, Department)
 --           Email is strictly protected and cannot be changed here.
 -- =============================================
 IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_UpdateStudentProfile' AND s.name = 'wms')
@@ -324,7 +383,9 @@ CREATE PROCEDURE wms.sp_UpdateStudentProfile
     @MobileNumber NVARCHAR(20)  = NULL,
     @CountryCode  VARCHAR(10)   = NULL,
     @Gender       TINYINT       = NULL,
-    @ProfileUrl   NVARCHAR(500) = NULL
+    @ProfileUrl   NVARCHAR(500) = NULL,
+    @Year         NVARCHAR(50)  = NULL,
+    @Department   NVARCHAR(100) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -343,6 +404,8 @@ BEGIN
         CountryCode  = @CountryCode,
         Gender       = @Gender,
         ProfileUrl   = COALESCE(@ProfileUrl, ProfileUrl),
+        [Year]       = COALESCE(@Year, [Year]),
+        Department   = COALESCE(@Department, Department),
         UpdatedAt    = GETUTCDATE()
     WHERE Id = @UserId;
 
@@ -539,6 +602,8 @@ BEGIN
             ELSE 'Not Specified'
         END AS GenderName,
         u.ProfileUrl,
+        u.[Year],
+        u.Department,
         r.Name AS RoleName,
         u.CreatedAt,
         u.UpdatedAt
@@ -550,7 +615,7 @@ GO
 
 -- =============================================
 -- SP: wms.sp_UpdateStudentProfile
--- Purpose : Updates profile data (FirstName, LastName, MobileNumber, CountryCode, Gender, ProfileUrl)
+-- Purpose : Updates profile data (FirstName, LastName, MobileNumber, CountryCode, Gender, ProfileUrl, Year, Department)
 --           Email is strictly protected and cannot be changed here.
 -- =============================================
 IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'sp_UpdateStudentProfile' AND s.name = 'wms')
@@ -564,7 +629,9 @@ CREATE PROCEDURE wms.sp_UpdateStudentProfile
     @MobileNumber NVARCHAR(20)  = NULL,
     @CountryCode  VARCHAR(10)   = NULL,
     @Gender       TINYINT       = NULL,
-    @ProfileUrl   NVARCHAR(500) = NULL
+    @ProfileUrl   NVARCHAR(500) = NULL,
+    @Year         NVARCHAR(50)  = NULL,
+    @Department   NVARCHAR(100) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -583,10 +650,218 @@ BEGIN
         CountryCode  = @CountryCode,
         Gender       = @Gender,
         ProfileUrl   = COALESCE(@ProfileUrl, ProfileUrl),
+        [Year]       = COALESCE(@Year, [Year]),
+        Department   = COALESCE(@Department, Department),
         UpdatedAt    = GETUTCDATE()
     WHERE Id = @UserId;
 
     -- Return updated profile directly
     EXEC wms.sp_GetStudentProfile @UserId = @UserId;
 END
+GO
+
+-- =============================================
+-- TABLE: wms.EmailOtpVerifications
+-- Purpose: Store hashed OTPs for email verification
+-- =============================================
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'EmailOtpVerifications' AND s.name = 'wms'
+)
+BEGIN
+    CREATE TABLE wms.EmailOtpVerifications
+    (
+        Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        Email NVARCHAR(256) NOT NULL,
+        OtpHash VARBINARY(32) NOT NULL,
+        Purpose TINYINT NOT NULL
+            CONSTRAINT DF_EmailOtp_Purpose DEFAULT 1, -- 1 = Register, 2 = ForgotPassword
+        ExpiresAt DATETIME2 NOT NULL,
+        CreatedAt DATETIME2 NOT NULL
+            CONSTRAINT DF_EmailOtp_CreatedAt DEFAULT SYSUTCDATETIME(),
+        IsUsed BIT NOT NULL
+            CONSTRAINT DF_EmailOtp_IsUsed DEFAULT 0,
+        FailedAttempts INT NOT NULL
+            CONSTRAINT DF_EmailOtp_FailedAttempts DEFAULT 0
+    );
+
+    CREATE INDEX IX_EmailOtp_Email_Purpose
+    ON wms.EmailOtpVerifications (Email, Purpose);
+END
+GO
+
+-- Ensure Purpose column exists if table was created previously without it
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'EmailOtpVerifications' AND schema_id = SCHEMA_ID('wms'))
+AND NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'EmailOtpVerifications' AND s.name = 'wms' AND c.name = 'Purpose'
+)
+BEGIN
+    ALTER TABLE wms.EmailOtpVerifications
+    ADD Purpose TINYINT NOT NULL CONSTRAINT DF_EmailOtp_Purpose DEFAULT 1;
+END
+GO
+
+-- =============================================
+-- SP: wms.usp_GetDailyOtpCount
+-- Purpose: Get total OTPs requested by an email today (UTC)
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetDailyOtpCount' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetDailyOtpCount;
+GO
+
+CREATE PROCEDURE wms.usp_GetDailyOtpCount
+    @Email     NVARCHAR(256),
+    @Purpose   TINYINT = 1,
+    @ResetDays INT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT COUNT(1) AS OtpCount
+    FROM wms.EmailOtpVerifications
+    WHERE Email = @Email
+      AND Purpose = @Purpose
+      AND CreatedAt >= DATEADD(DAY, -@ResetDays, SYSUTCDATETIME());
+END
+GO
+
+-- =============================================
+-- SP: wms.usp_SaveEmailOtp
+-- Purpose: Invalidate older unused OTPs and insert a new hashed OTP
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_SaveEmailOtp' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_SaveEmailOtp;
+GO
+
+CREATE PROCEDURE wms.usp_SaveEmailOtp
+    @Email     NVARCHAR(256),
+    @OtpHash   VARBINARY(32),
+    @Purpose   TINYINT = 1,
+    @ExpiresAt DATETIME2
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Invalidate any previous unused OTPs for this email and purpose
+    UPDATE wms.EmailOtpVerifications
+    SET IsUsed = 1
+    WHERE Email = @Email
+      AND Purpose = @Purpose
+      AND IsUsed = 0;
+
+    INSERT INTO wms.EmailOtpVerifications
+        (Email, OtpHash, Purpose, ExpiresAt, CreatedAt, IsUsed, FailedAttempts)
+    VALUES
+        (@Email, @OtpHash, @Purpose, @ExpiresAt, SYSUTCDATETIME(), 0, 0);
+
+    SELECT SCOPE_IDENTITY() AS Id;
+END
+GO
+
+-- =============================================
+-- SP: wms.usp_GetLatestEmailOtp
+-- Purpose: Fetch the latest OTP record for an email and purpose
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetLatestEmailOtp' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetLatestEmailOtp;
+GO
+
+CREATE PROCEDURE wms.usp_GetLatestEmailOtp
+    @Email   NVARCHAR(256),
+    @Purpose TINYINT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP 1
+        Id,
+        Email,
+        OtpHash,
+        Purpose,
+        ExpiresAt,
+        CreatedAt,
+        IsUsed,
+        FailedAttempts
+    FROM wms.EmailOtpVerifications
+    WHERE Email = @Email
+      AND Purpose = @Purpose
+    ORDER BY Id DESC;
+END
+GO
+
+-- =============================================
+-- SP: wms.usp_IncrementOtpFailedAttempts
+-- Purpose: Increment the failed attempts counter on an OTP
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_IncrementOtpFailedAttempts' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_IncrementOtpFailedAttempts;
+GO
+
+CREATE PROCEDURE wms.usp_IncrementOtpFailedAttempts
+    @Id BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.EmailOtpVerifications
+    SET FailedAttempts = FailedAttempts + 1
+    WHERE Id = @Id;
+
+    SELECT FailedAttempts
+    FROM wms.EmailOtpVerifications
+    WHERE Id = @Id;
+END
+GO
+
+-- =============================================
+-- SP: wms.usp_MarkEmailOtpUsed
+-- Purpose: Mark an OTP as successfully used
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_MarkEmailOtpUsed' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_MarkEmailOtpUsed;
+GO
+
+CREATE PROCEDURE wms.usp_MarkEmailOtpUsed
+    @Id BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.EmailOtpVerifications
+    SET IsUsed = 1
+    WHERE Id = @Id;
+END
+GO
+
+-- =============================================
+-- SP: wms.usp_CheckEmailOtpVerified
+-- Purpose: Check if an email was verified within the last 15 minutes
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_CheckEmailOtpVerified' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_CheckEmailOtpVerified;
+GO
+
+CREATE PROCEDURE wms.usp_CheckEmailOtpVerified
+    @Email   NVARCHAR(256),
+    @Purpose TINYINT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP 1 Id
+    FROM wms.EmailOtpVerifications
+    WHERE Email = @Email
+      AND Purpose = @Purpose
+      AND IsUsed = 1
+      AND CreatedAt >= DATEADD(MINUTE, -15, SYSUTCDATETIME())
+    ORDER BY Id DESC;
+END
+GO
+
+-- Reset OTP verification limit for test user so they can test immediately
+DELETE FROM wms.EmailOtpVerifications WHERE Email = 'vasanthakumar3043@gmail.com';
 GO

@@ -77,6 +77,7 @@ public class WebinarDto
     public bool      IsPaid            { get; set; }
     public double?   Price             { get; set; }
     public List<WebinarCountryPriceDto> CountryPrices { get; set; } = new();
+    public List<DashboardCountryRevenueDto> CountryRevenues { get; set; } = new();
     public string    ShareId           { get; set; } = string.Empty;
     public int?      CertificateTempId { get; set; }
     public string?   CertificateTemplateName { get; set; }
@@ -95,6 +96,7 @@ public class WebinarDto
     public bool?     IsMeetingCreated  { get; set; }
     public bool      IsCompleted       { get; set; }
     public string?   ModeratorJoinUrl  { get; set; }
+    public string?   AttendeeJoinUrl   { get; set; }
     public string?   MeetingID         { get; set; }
     public int       RemainingSlots    { get; set; }
     public bool      IsCapacityFull    { get; set; }
@@ -164,6 +166,9 @@ public class EmailQueueItemDto
     public string   RecipientEmail     { get; set; } = string.Empty;
     public string   RecipientFirstName { get; set; } = string.Empty;
     public string?  RecipientLastName  { get; set; }
+    public string?  RecipientCountryCode { get; set; } = "+91";
+    public string?  RecipientMobileNumber { get; set; }
+    public string?  RecipientTimeZone  { get; set; }
     public string   WebinarName        { get; set; } = string.Empty;
     public string   ShareId            { get; set; } = string.Empty;
     public DateTime WebinarDate        { get; set; }
@@ -204,6 +209,8 @@ public class CompletedWebinarDto
     public bool      IsCompleted            { get; set; }
     public bool      CanDownloadCertificate { get; set; }
     public string    ParticipantName        { get; set; } = string.Empty;
+    public string?   Year                   { get; set; }
+    public string?   Department             { get; set; }
     public string    CertificateId          { get; set; } = string.Empty;
     public int?      CertificateTempId      { get; set; }
     public string?   CertificateTemplateName { get; set; }
@@ -284,6 +291,7 @@ public class WebinarPaymentDto
     public int       RegistrationCount { get; set; }
     public double    TotalAmount       { get; set; }
     public List<WebinarCountryPriceDto> CountryPrices { get; set; } = new();
+    public List<DashboardCountryRevenueDto> CountryRevenues { get; set; } = new();
 }
 
 public class PaymentsSummaryDto
@@ -296,6 +304,14 @@ public class PaymentsSummaryDto
     public int                            TotalFreeWebinars      { get; set; }
     public List<DashboardCountryRevenueDto> CountryRevenues      { get; set; } = new();
     public IEnumerable<WebinarPaymentDto> Webinars               { get; set; } = new List<WebinarPaymentDto>();
+}
+
+public class WebinarCountryRevenueRawDto
+{
+    public long   WebinarId         { get; set; }
+    public string CountryCode       { get; set; } = "+91";
+    public double TotalAmount       { get; set; }
+    public int    RegistrationCount { get; set; }
 }
 
 // -------------------------------------------------------

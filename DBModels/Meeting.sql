@@ -360,7 +360,7 @@ CREATE PROCEDURE wms.usp_ScheduleMeeting
     @AutoStartRecording                     BIT,
     @AllowStartStopRecording                BIT,
     @LogoutURL                              NVARCHAR(1000) = NULL,
-    @MeetingExpireIfNoUserJoinedInMinutes   INT = 300,
+    @MeetingExpireIfNoUserJoinedInMinutes   INT = 10,
     @MeetingExpireWhenLastUserLeftInMinutes INT = 1,
     @EndWhenNoModerator                     BIT = 0,
     @GuestPolicy                            NVARCHAR(50) = 'ALWAYS_ACCEPT',
@@ -874,3 +874,53 @@ BEGIN
     SELECT 1 AS Success, 'Attendance recorded and Webinar completed successfully.' AS Message;
 END
 GO
+
+-- ============================================================
+-- SP: wms.usp_CheckUnscheduledWebinarsAdminAlert
+-- Alerts the admin who created the webinar if starting within buffer time
+-- and no meeting has been scheduled/created yet. (Does NOT create BBB room)
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_CheckUnscheduledWebinarsAdminAlert' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_CheckUnscheduledWebinarsAdminAlert;
+GO
+
+CREATE PROCEDURE wms.usp_CheckUnscheduledWebinarsAdminAlert
+    @BufferMinutes INT = 30
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @NowUtc DATETIME2(0) = SYSUTCDATETIME();
+    DECLARE @AlertThresholdUtc DATETIME2(0) = DATEADD(MINUTE, @BufferMinutes, @NowUtc);
+
+    -- Find webinars starting within the buffer window that do NOT have a created meeting
+    -- and have not already had an alert queued for this webinar
+    INSERT INTO wms.EmailQueue (WebinarId, UserId, EmailType, JoinLink, IsSent, TimeSent, CreatedAt)
+    SELECT 
+        w.Id AS WebinarId,
+        COALESCE(w.CreatedBy, (SELECT TOP 1 Id FROM wms.Users WHERE RoleId = 1), 1) AS UserId,
+        'ADMIN_UNSCHEDULED_MEETING_ALERT' AS EmailType,
+        NULL AS JoinLink,
+        NULL AS IsSent,
+        0 AS TimeSent,
+        GETUTCDATE() AS CreatedAt
+    FROM wms.Webinars w
+    WHERE w.StartTime > @NowUtc
+      AND w.StartTime <= @AlertThresholdUtc
+      AND w.IsCompleted = 0
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM wms.Meetings m 
+          WHERE m.WebinarId = w.Id AND m.IsMeetingCreated = 1
+      )
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM wms.EmailQueue eq 
+          WHERE eq.WebinarId = w.Id 
+            AND eq.EmailType = 'ADMIN_UNSCHEDULED_MEETING_ALERT'
+      );
+
+    SELECT @@ROWCOUNT AS QueuedAlertsCount;
+END
+GO
+

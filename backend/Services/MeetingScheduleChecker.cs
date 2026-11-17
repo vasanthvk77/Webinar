@@ -19,6 +19,7 @@ public class MeetingScheduleChecker : BackgroundService
     private readonly IConfiguration _config;
     private readonly ILogger<MeetingScheduleChecker> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _connectionString;
     private readonly string _createMeetingApi;
     private readonly string _joinMeetingApi;
@@ -26,15 +27,18 @@ public class MeetingScheduleChecker : BackgroundService
     private readonly string _serverToServerUrl;
     private readonly int _intervalInMinutes;
     private readonly int _gracePeriodInMinutes;
+    private readonly int _adminAlertBufferMinutes;
 
     public MeetingScheduleChecker(
         IConfiguration config,
         ILogger<MeetingScheduleChecker> logger,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IServiceScopeFactory scopeFactory)
     {
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _scopeFactory = scopeFactory;
 
         _connectionString = config.GetConnectionString("DefaultConnection")
                           ?? throw new InvalidOperationException("Connection string not configured.");
@@ -50,6 +54,7 @@ public class MeetingScheduleChecker : BackgroundService
 
         _intervalInMinutes = config.GetValue<int>("MeetingScheduleChecker:IntervalInMinutes", 2);
         _gracePeriodInMinutes = config.GetValue<int>("MeetingScheduleChecker:GracePeriodInMinutes", 5);
+        _adminAlertBufferMinutes = config.GetValue<int>("MeetingScheduleChecker:AdminAlertBufferMinutesBeforeStart", 30);
     }
 
     private void LogBoth(string message)
@@ -92,6 +97,9 @@ public class MeetingScheduleChecker : BackgroundService
 
         using var conn = new SqlConnection(_connectionString);
 
+        // Check if any webinar is starting within 30 minutes without a meeting created, and alert the admin
+        await CheckUnscheduledWebinarsAdminAlertAsync(conn, stoppingToken);
+
         // Fast query driven by filtered index IX_Meetings_PendingCreation
         var candidates = (await conn.QueryAsync<PendingMeetingScheduleDto>(
             "wms.CheckMeetingSchedule",
@@ -119,6 +127,7 @@ public class MeetingScheduleChecker : BackgroundService
                 LogBoth($"[MeetingScheduleChecker] ⚡ Meeting '{meeting.Name}' (MeetingID: {meeting.MeetingID}) is ALREADY created on BBB. Checking attendee links immediately...");
                 await SyncAttendeeLinksAsync(meeting, conn, stoppingToken);
                 await CheckAndQueueMeetingJoinEmailsAsync(meeting, conn, stoppingToken);
+                await UpdateGoogleCalendarEventsAsync(meeting.WebinarId);
                 continue;
             }
 
@@ -142,6 +151,7 @@ public class MeetingScheduleChecker : BackgroundService
                     // Immediately generate attendee links after BBB create success
                     await SyncAttendeeLinksAsync(meeting, conn, stoppingToken);
                     await CheckAndQueueMeetingJoinEmailsAsync(meeting, conn, stoppingToken);
+                    await UpdateGoogleCalendarEventsAsync(meeting.WebinarId);
                 }
             }
             else if (nowUtc < triggerTimeUtc)
@@ -432,6 +442,41 @@ public class MeetingScheduleChecker : BackgroundService
         catch (Exception ex)
         {
             LogWarnBoth($"[MeetingScheduleChecker] ❌ Exception while queueing meeting join emails for '{meeting.MeetingID}': {ex.Message}");
+        }
+    }
+
+    private async Task CheckUnscheduledWebinarsAdminAlertAsync(SqlConnection conn, CancellationToken stoppingToken)
+    {
+        try
+        {
+            var queuedCount = await conn.QueryFirstOrDefaultAsync<int>(
+                "wms.usp_CheckUnscheduledWebinarsAdminAlert",
+                new { BufferMinutes = _adminAlertBufferMinutes },
+                commandType: CommandType.StoredProcedure
+            );
+
+            if (queuedCount > 0)
+            {
+                LogBoth($"[MeetingScheduleChecker] ⚠️ Queued {queuedCount} unscheduled webinar alert(s) to Admin(s) in EmailQueue (Webinars starting within {_adminAlertBufferMinutes} mins).");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogWarnBoth($"[MeetingScheduleChecker] ⚠️ Error checking unscheduled webinars for admin alert: {ex.Message}");
+        }
+    }
+
+    private async Task UpdateGoogleCalendarEventsAsync(long webinarId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var calService = scope.ServiceProvider.GetRequiredService<IGoogleCalendarService>();
+            await calService.UpdateCalendarEventsWithJoinLinkAsync(webinarId);
+        }
+        catch (Exception ex)
+        {
+            LogWarnBoth($"[MeetingScheduleChecker] Non-fatal error updating Google Calendar for Webinar {webinarId}: {ex.Message}");
         }
     }
 }

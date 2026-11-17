@@ -324,7 +324,7 @@ namespace WebinarApi.Services
                     _logger.LogWarning(cpEx, "[Webinar] GetPaymentsAsync: Failed to attach country prices.");
                 }
 
-                // Query country revenue breakdown
+                // Query country revenue breakdown overall and per webinar
                 var countryRevenues = new List<DashboardCountryRevenueDto>();
                 try
                 {
@@ -342,6 +342,38 @@ namespace WebinarApi.Services
                         ORDER BY TotalAmount DESC;
                     ");
                     countryRevenues = cRevs.ToList();
+
+                    // Query per-webinar country revenues
+                    var perWebinarRevs = await conn.QueryAsync<WebinarCountryRevenueRawDto>(@"
+                        SELECT
+                            w.Id AS WebinarId,
+                            ISNULL(u.CountryCode, '+91') AS CountryCode,
+                            CAST(ISNULL(SUM(CASE WHEN w.IsPaid = 1 THEN ISNULL(wp.Amount, 0.0) ELSE 0.0 END), 0.0) AS FLOAT) AS TotalAmount,
+                            COUNT(CASE WHEN w.IsPaid = 1 THEN 1 END) AS RegistrationCount
+                        FROM wms.WebinarRegistrations wr
+                        JOIN wms.Webinars w ON w.Id = wr.WebinarId
+                        JOIN wms.Users u ON u.Id = wr.UserId
+                        LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = wr.WebinarId AND wp.CountryCode = u.CountryCode
+                        WHERE w.IsPaid = 1
+                        GROUP BY w.Id, u.CountryCode;
+                    ");
+
+                    var groupedWRevs = perWebinarRevs
+                        .GroupBy(r => r.WebinarId)
+                        .ToDictionary(g => g.Key, g => g.Select(x => new DashboardCountryRevenueDto
+                        {
+                            CountryCode = x.CountryCode,
+                            TotalAmount = x.TotalAmount,
+                            RegistrationCount = x.RegistrationCount
+                        }).ToList());
+
+                    foreach (var w in list)
+                    {
+                        if (groupedWRevs.TryGetValue(w.WebinarId, out var wRevList))
+                        {
+                            w.CountryRevenues = wRevList;
+                        }
+                    }
                 }
                 catch (Exception crEx)
                 {

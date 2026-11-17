@@ -45,6 +45,54 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Send OTP for registration email verification
+    /// POST /api/auth/send-otp
+    /// </summary>
+    [HttpPost("send-otp")]
+    public async Task<IActionResult> SendOtp([FromBody] SendOtpRequest request)
+    {
+        _logger.LogInformation("[AuthController] POST /api/auth/send-otp — Email: {Email}, Purpose: {Purpose}", request.Email, request.Purpose);
+
+        if (string.IsNullOrWhiteSpace(request.Email))
+        {
+            return BadRequest(new { success = false, message = "Email is required." });
+        }
+
+        var (success, message, remainingDailyOtps, expiresInSeconds) = await _authService.SendRegistrationOtpAsync(request.Email);
+
+        if (!success)
+        {
+            return BadRequest(new { success = false, message, remainingDailyOtps });
+        }
+
+        return Ok(new { success = true, message, remainingDailyOtps, expiresInSeconds });
+    }
+
+    /// <summary>
+    /// Verify OTP for registration
+    /// POST /api/auth/verify-otp
+    /// </summary>
+    [HttpPost("verify-otp")]
+    public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequest request)
+    {
+        _logger.LogInformation("[AuthController] POST /api/auth/verify-otp — Email: {Email}, Purpose: {Purpose}", request.Email, request.Purpose);
+
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Otp))
+        {
+            return BadRequest(new { success = false, message = "Email and OTP code are required." });
+        }
+
+        var (success, message) = await _authService.VerifyRegistrationOtpAsync(request.Email, request.Otp);
+
+        if (!success)
+        {
+            return BadRequest(new { success = false, message });
+        }
+
+        return Ok(new { success = true, message });
+    }
+
+    /// <summary>
     /// Login with email/password
     /// POST /api/auth/login
     /// </summary>

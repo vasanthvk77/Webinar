@@ -176,6 +176,68 @@ public class WebinarsController : ControllerBase
     }
 
     // -------------------------------------------------------
+    // GET /api/webinars/{id}/certificate/preview — In-browser inline Certificate Preview
+    // -------------------------------------------------------
+    [HttpGet("{id:long}/certificate/preview")]
+    public async Task<IActionResult> PreviewCertificate(long id)
+    {
+        _logger.LogInformation("[FLOW-1] PreviewCertificate HIT — WebinarId={WebinarId}, UserId={UserId}", id, CallerUserId);
+
+        if (CallerUserId <= 0)
+        {
+            _logger.LogWarning("[FLOW-1] REJECTED — CallerUserId is 0 or negative");
+            return Unauthorized(new { success = false, message = "Authentication required." });
+        }
+
+        _logger.LogInformation("[FLOW-2] Fetching completed webinar record for UserId={UserId}, WebinarId={WebinarId}", CallerUserId, id);
+        var results = await _webinarService.GetCompletedWebinarsAsync(CallerUserId, id);
+        var item = results.FirstOrDefault();
+
+        if (item == null)
+        {
+            _logger.LogWarning("[FLOW-2] FAILED — No completed webinar record found for UserId={UserId}, WebinarId={WebinarId}", CallerUserId, id);
+            return NotFound(new { success = false, message = "Webinar completion record not found for this user." });
+        }
+
+        _logger.LogInformation("[FLOW-2] Found record — ParticipantName={Name}, WebinarName={Webinar}, CanDownload={Can}, CertTempId={TempId}, Year={Year}, Dept={Dept}",
+            item.ParticipantName, item.WebinarName, item.CanDownloadCertificate, item.CertificateTempId, item.Year, item.Department);
+
+        if (!item.CanDownloadCertificate)
+        {
+            _logger.LogWarning("[FLOW-2] FORBIDDEN — CanDownloadCertificate=false for UserId={UserId}", CallerUserId);
+            return Forbid();
+        }
+
+        string templateId = (item.CertificateTempId.HasValue && item.CertificateTempId.Value > 0)
+            ? item.CertificateTempId.Value.ToString()
+            : "CertificateTemplate1";
+
+        _logger.LogInformation("[FLOW-3] Resolved templateId={TemplateId}", templateId);
+
+        var req = new CertificateRequest(
+            item.ParticipantName,
+            item.WebinarName,
+            item.WebinarDate,
+            !string.IsNullOrWhiteSpace(item.CertificateCode) ? item.CertificateCode : item.CertificateId,
+            item.Year,
+            item.Department
+        );
+
+        _logger.LogInformation("[FLOW-4] Calling GenerateCertificatePdf with templateId={TemplateId}", templateId);
+        var pdfBytes = _certificateService.GenerateCertificatePdf(templateId, req);
+
+        if (pdfBytes == null)
+        {
+            _logger.LogError("[FLOW-4] GenerateCertificatePdf returned NULL for templateId={TemplateId} — PDF generation failed", templateId);
+            return NotFound(new { success = false, message = "Certificate template not found." });
+        }
+
+        _logger.LogInformation("[FLOW-5] PDF generated OK — {Bytes} bytes, returning inline", pdfBytes.Length);
+        Response.Headers.Append("Content-Disposition", "inline; filename=Certificate.pdf");
+        return File(pdfBytes, "application/pdf");
+    }
+
+    // -------------------------------------------------------
     // GET /api/webinars/{id}/certificate/download — Condition 3: Certificate Download
     // Strict Verification: Checks if student is eligible for certificate before streaming PDF
     // -------------------------------------------------------
@@ -203,7 +265,9 @@ public class WebinarsController : ControllerBase
             item.ParticipantName,
             item.WebinarName,
             item.WebinarDate,
-            !string.IsNullOrWhiteSpace(item.CertificateCode) ? item.CertificateCode : item.CertificateId
+            !string.IsNullOrWhiteSpace(item.CertificateCode) ? item.CertificateCode : item.CertificateId,
+            item.Year,
+            item.Department
         );
 
         var pdfBytes = _certificateService.GenerateCertificatePdf(templateId, req);

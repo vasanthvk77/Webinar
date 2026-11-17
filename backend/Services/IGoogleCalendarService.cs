@@ -8,6 +8,7 @@ namespace WebinarApi.Services
         string GetAuthorizationUrl(int userId, long webinarId);
         Task<(bool success, string message, string? htmlRedirect)> HandleCallbackAsync(string code, string? state);
         Task<AddCalendarEventResponse> AddWebinarToCalendarAsync(int userId, long webinarId, string? timezone = null);
+        Task UpdateCalendarEventsWithJoinLinkAsync(long webinarId);
     }
 }
 

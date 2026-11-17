@@ -1063,6 +1063,9 @@ BEGIN
         u.Email AS RecipientEmail,
         u.FirstName AS RecipientFirstName,
         u.LastName AS RecipientLastName,
+        ISNULL(u.CountryCode, '+91') AS RecipientCountryCode,
+        u.MobileNumber AS RecipientMobileNumber,
+        u.TimeZone AS RecipientTimeZone,
         w.WebinarName,
         w.ShareId,
         w.WebinarDate,
@@ -1219,7 +1222,15 @@ BEGIN
         LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
         LEFT JOIN wms.WebinarRegistrations wr ON wr.WebinarId = w.Id AND wr.UserId = @StudentId
         LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
-        WHERE w.EndTime >= SYSUTCDATETIME() AND w.IsCompleted = 0
+        WHERE w.EndTime >= SYSUTCDATETIME() 
+          AND w.IsCompleted = 0
+          AND (
+              -- Free webinars are open to all students
+              w.IsPaid = 0 
+              OR 
+              -- Paid webinars are ONLY shown if admin explicitly configured a price for this student's country
+              (@StudentCountryCode IS NOT NULL AND wp.Amount IS NOT NULL AND wp.Amount > 0)
+          )
         ORDER BY w.WebinarDate ASC, w.StartTime ASC;
 
         RETURN;
@@ -1275,13 +1286,17 @@ BEGIN
             (SELECT COUNT(1) FROM wms.WebinarRegistrations wrg WHERE wrg.WebinarId = w.Id) AS RegistrationCount,
             CAST(1 AS BIT) AS IsRegistered,
             wr.CreatedDateTime AS RegisteredAt,
-            wr.Id AS RegistrationId
+            wr.Id AS RegistrationId,
+            w.IsMeetingCreated,
+            w.IsCompleted,
+            aml.JoinLink AS AttendeeJoinUrl
         FROM wms.WebinarRegistrations wr
         JOIN wms.Webinars w ON w.Id = wr.WebinarId
         JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
         LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
         LEFT JOIN wms.Users uc ON uc.Id = w.CreatedBy
         LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
+        LEFT JOIN wms.AttendeeMeetingLinks aml ON aml.WebinarRegistrationId = wr.Id
         WHERE wr.UserId = @StudentId
         ORDER BY wr.CreatedDateTime DESC;
 
@@ -1419,6 +1434,8 @@ BEGIN
         END AS CanDownloadCertificate,
 
         u.FirstName + ISNULL(' ' + u.LastName, '') AS ParticipantName,
+        u.[Year],
+        u.Department,
         COALESCE(wc.CertificateCode, 'PDX-WB-' + CAST(w.Id AS NVARCHAR(20)) + '-' + CAST(u.Id AS NVARCHAR(20))) AS CertificateId
 
     FROM wms.WebinarCompleted wc

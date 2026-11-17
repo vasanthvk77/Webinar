@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   Box, Typography, TextField, Button,
-  Paper, InputAdornment, Container, IconButton, Divider
+  Paper, InputAdornment, Container, IconButton, Divider,
+  Snackbar, Alert
 } from "@mui/material";
-import { Mail, Lock, Eye, EyeOff, User, Phone } from "lucide-react";
-import toast from "react-hot-toast";
+import { Mail, Lock, Eye, EyeOff, User, Phone, CheckCircle, RotateCw } from "lucide-react";
 import { PhoneInput } from "react-international-phone";
 import "react-international-phone/style.css";
 import { authService } from "../services/api";
@@ -27,10 +27,54 @@ const Signup = ({ mode }) => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+
+  // Snackbar State
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: "",
+    severity: "error"
+  });
+
+  const showSnackbar = (message, severity = "error") => {
+    setSnackbar({ open: true, message, severity });
+  };
+
+  const handleCloseSnackbar = (event, reason) => {
+    if (reason === "clickaway") return;
+    setSnackbar(prev => ({ ...prev, open: false }));
+  };
+
+  // OTP Verification States
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpTimer, setOtpTimer] = useState(0);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpBlocked, setOtpBlocked] = useState(false);
+
+  // 60-second OTP Countdown Timer
+  useEffect(() => {
+    let interval = null;
+    if (otpTimer > 0) {
+      interval = setInterval(() => {
+        setOtpTimer((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [otpTimer]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    if (name === "email") {
+      if (isEmailVerified || otpSent) {
+        setIsEmailVerified(false);
+        setOtpSent(false);
+        setOtp("");
+        setOtpBlocked(false);
+        setOtpTimer(0);
+      }
+    }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
@@ -43,25 +87,88 @@ const Signup = ({ mode }) => {
     }));
   };
 
+  // Send OTP
+  const handleSendOtp = async () => {
+    const emailValidation = validateEmail(formData.email);
+    if (!emailValidation.isValid) {
+      showSnackbar(emailValidation.error, "error");
+      return;
+    }
+
+    setOtpSending(true);
+    try {
+      const response = await authService.sendOtp(formData.email.trim(), 1);
+      if (response.data.success) {
+        showSnackbar(response.data.message || "Verification code sent to your email!", "success");
+        setOtpSent(true);
+        setOtp("");
+        setOtpBlocked(false);
+        const seconds = response.data.expiresInSeconds || 60;
+        setOtpTimer(seconds);
+      } else {
+        showSnackbar(response.data.message || "Failed to send OTP.", "error");
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || "Failed to send OTP. Please try again.";
+      showSnackbar(msg, "error");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  // Verify OTP
+  const handleVerifyOtp = async () => {
+    if (!otp.trim() || otp.trim().length !== 6) {
+      showSnackbar("Please enter the 6-digit OTP code.", "error");
+      return;
+    }
+
+    setOtpVerifying(true);
+    try {
+      const response = await authService.verifyOtp(formData.email.trim(), otp.trim(), 1);
+      if (response.data.success) {
+        showSnackbar("Email verified successfully!", "success");
+        setIsEmailVerified(true);
+        setOtpSent(false);
+        setOtp("");
+        setOtpTimer(0);
+      } else {
+        showSnackbar(response.data.message || "Verification failed.", "error");
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || "Failed to verify OTP.";
+      showSnackbar(msg, "error");
+      if (msg.includes("Maximum OTP verification attempts exceeded") || msg.includes("exceeded")) {
+        setOtpBlocked(true);
+      }
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError("");
+
+    if (!isEmailVerified) {
+      showSnackbar("Please verify your email address before creating an account.", "error");
+      return;
+    }
 
     // Validate
     const emailValidation = validateEmail(formData.email);
     if (!emailValidation.isValid) {
-      setError(emailValidation.error);
+      showSnackbar(emailValidation.error, "error");
       return;
     }
 
     const passwordValidation = validatePassword(formData.password);
     if (!passwordValidation.isValid) {
-      setError(passwordValidation.error);
+      showSnackbar(passwordValidation.error, "error");
       return;
     }
 
     if (!formData.firstName.trim()) {
-      setError("First name is required");
+      showSnackbar("First name is required", "error");
       return;
     }
 
@@ -94,20 +201,19 @@ const Signup = ({ mode }) => {
         localStorage.setItem("token", response.data.token);
         localStorage.setItem("user", JSON.stringify(response.data.user));
         localStorage.setItem("firstName", response.data.user.firstName);
-        toast.success("Registration successful!");
+        showSnackbar("Registration successful!", "success");
         navigate("/dashboard");
       } else {
-        setError(response.data.message || "Registration failed");
+        showSnackbar(response.data.message || "Registration failed", "error");
       }
     } catch (err) {
-      setError(err.response?.data?.message || "An error occurred during registration");
+      showSnackbar(err.response?.data?.message || "An error occurred during registration", "error");
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleSuccess = async (credentialResponse) => {
-    setError("");
     setLoading(true);
     try {
       const response = await authService.googleLogin(credentialResponse.credential);
@@ -116,13 +222,13 @@ const Signup = ({ mode }) => {
         localStorage.setItem("token", response.data.token);
         localStorage.setItem("user", JSON.stringify(response.data.user));
         localStorage.setItem("firstName", response.data.user.firstName);
-        toast.success(`Welcome, ${response.data.user.firstName}!`);
+        showSnackbar(`Welcome, ${response.data.user.firstName}!`, "success");
         navigate("/dashboard");
       } else {
-        setError(response.data.message || "Google signup failed");
+        showSnackbar(response.data.message || "Google signup failed", "error");
       }
     } catch (err) {
-      setError(err.response?.data?.message || "Google authentication failed");
+      showSnackbar(err.response?.data?.message || "Google authentication failed", "error");
     } finally {
       setLoading(false);
     }
@@ -279,9 +385,16 @@ const Signup = ({ mode }) => {
 
             {/* Email */}
             <Box sx={{ textAlign: "left", mb: 3 }}>
-              <Typography sx={{ fontSize: "12px", fontWeight: 700, color: isDark ? "#94a3b8" : "#475569", mb: 1, ml: 0.5, textTransform: "uppercase", letterSpacing: "0.2px" }}>
-                Email Address
-              </Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1, ml: 0.5 }}>
+                <Typography sx={{ fontSize: "12px", fontWeight: 700, color: isDark ? "#94a3b8" : "#475569", textTransform: "uppercase", letterSpacing: "0.2px" }}>
+                  Email Address
+                </Typography>
+                {isEmailVerified && (
+                  <Typography sx={{ fontSize: "12px", fontWeight: 700, color: "#10b981", display: "flex", alignItems: "center", gap: 0.5 }}>
+                    <CheckCircle size={14} /> Verified
+                  </Typography>
+                )}
+              </Box>
               <TextField
                 fullWidth
                 placeholder="john@example.com"
@@ -289,16 +402,104 @@ const Signup = ({ mode }) => {
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
+                disabled={isEmailVerified}
                 autoComplete="email"
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start" sx={{ mr: 1.5 }}>
-                      <Mail size={18} color="#3b82f6" />
+                      <Mail size={18} color={isEmailVerified ? "#10b981" : "#3b82f6"} />
                     </InputAdornment>
                   ),
+                  endAdornment: isEmailVerified ? (
+                    <InputAdornment position="end">
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setIsEmailVerified(false);
+                          setOtpSent(false);
+                          setOtp("");
+                        }}
+                        sx={{ fontSize: "11px", textTransform: "none", color: isDark ? "#93c5fd" : "#2563eb", p: 0.5 }}
+                      >
+                        Change
+                      </Button>
+                    </InputAdornment>
+                  ) : null
                 }}
                 sx={dynamicInputStyle}
               />
+
+              {/* OTP Input Card when sent */}
+              {otpSent && !isEmailVerified && (
+                <Box sx={{
+                  mt: 2,
+                  p: 2,
+                  borderRadius: "10px",
+                  bgcolor: isDark ? "rgba(59, 130, 246, 0.08)" : "rgba(59, 130, 246, 0.05)",
+                  border: isDark ? "1px solid rgba(59, 130, 246, 0.25)" : "1px solid rgba(59, 130, 246, 0.2)",
+                  textAlign: "left"
+                }}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+                    <Typography sx={{ fontSize: "11px", fontWeight: 700, color: isDark ? "#93c5fd" : "#1d4ed8", textTransform: "uppercase" }}>
+                      Enter 6-Digit OTP Code
+                    </Typography>
+                    {otpTimer > 0 ? (
+                      <Typography sx={{ fontSize: "11px", fontWeight: 600, color: isDark ? "#94a3b8" : "#64748b" }}>
+                        Expires in {otpTimer}s
+                      </Typography>
+                    ) : (
+                      <Typography sx={{ fontSize: "11px", fontWeight: 700, color: "#ef4444" }}>
+                        Expired
+                      </Typography>
+                    )}
+                  </Box>
+
+                  <TextField
+                    fullWidth
+                    placeholder="••••••"
+                    value={otp}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "").slice(0, 6);
+                      setOtp(val);
+                      if (otpError) setOtpError("");
+                    }}
+                    disabled={otpBlocked || otpVerifying}
+                    inputProps={{
+                      maxLength: 6,
+                      style: {
+                        textAlign: "center",
+                        letterSpacing: "8px",
+                        fontSize: "20px",
+                        fontWeight: 700,
+                        fontFamily: "monospace",
+                        padding: "8px 12px"
+                      }
+                    }}
+                    sx={dynamicInputStyle}
+                  />
+
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1.5 }}>
+                    <Button
+                      size="small"
+                      disabled={otpSending || (otpTimer > 0 && !otpBlocked)}
+                      onClick={handleSendOtp}
+                      sx={{ fontSize: "12px", textTransform: "none", color: "#3b82f6", p: 0, minWidth: 0 }}
+                    >
+                      {otpSending ? "Sending..." : "Resend OTP"}
+                    </Button>
+
+                    <Button
+                      variant="contained"
+                      size="small"
+                      disabled={otpVerifying || otpBlocked || otp.trim().length !== 6}
+                      onClick={handleVerifyOtp}
+                      sx={{ fontSize: "12px", textTransform: "none", px: 2, py: 0.5, borderRadius: 1.5 }}
+                    >
+                      {otpVerifying ? "Verifying..." : "Verify Code"}
+                    </Button>
+                  </Box>
+                </Box>
+              )}
             </Box>
 
             {/* Phone Number with Country Picker */}
@@ -367,23 +568,53 @@ const Signup = ({ mode }) => {
               </Typography>
             </Box>
 
-            {/* Error message */}
-            {error && (
-              <Typography sx={{ mb: 3, fontSize: "13px", color: "#ef4444", textAlign: "left" }}>
-                ✕ {error}
-              </Typography>
+            {/* Submit / Verify Button */}
+            {!isEmailVerified ? (
+              <Button
+                fullWidth
+                variant="contained"
+                disabled={
+                  otpSending ||
+                  otpVerifying ||
+                  !formData.email.trim() ||
+                  !validateEmail(formData.email).isValid
+                }
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (!otpSent) {
+                    handleSendOtp();
+                  } else if (otp.trim().length === 6 && !otpBlocked) {
+                    handleVerifyOtp();
+                  } else if (otpTimer === 0 || otpBlocked) {
+                    handleSendOtp();
+                  }
+                }}
+                sx={{
+                  py: 1.5,
+                  fontSize: "15px",
+                  letterSpacing: "0.5px",
+                  textTransform: "none",
+                  borderRadius: 2,
+                  mb: 3
+                }}
+              >
+                {otpSending
+                  ? "Sending Verification Code..."
+                  : otpSent && otp.trim().length === 6
+                  ? (otpVerifying ? "Verifying..." : "Verify OTP")
+                  : "Verify Email"}
+              </Button>
+            ) : (
+              <Button
+                fullWidth
+                variant="contained"
+                type="submit"
+                disabled={loading}
+                sx={{ py: 1.5, fontSize: "15px", letterSpacing: "0.5px", textTransform: "none", borderRadius: 2, mb: 3 }}
+              >
+                {loading ? "Creating Account..." : "Create Account"}
+              </Button>
             )}
-
-            {/* Submit Button */}
-            <Button
-              fullWidth
-              variant="contained"
-              type="submit"
-              disabled={loading}
-              sx={{ py: 1.5, fontSize: "15px", letterSpacing: "0.5px", textTransform: "none", borderRadius: 2, mb: 3 }}
-            >
-              {loading ? "Creating Account..." : "Create Account"}
-            </Button>
 
             {/* Login Link */}
             <Typography sx={{ fontSize: "14px", color: isDark ? "#94a3b8" : "#475569" }}>
@@ -405,6 +636,23 @@ const Signup = ({ mode }) => {
           </Typography>
         </Paper>
       </Container>
+
+      {/* Snackbar Alert */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
+      >
+        <Alert
+          onClose={handleCloseSnackbar}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: "100%", boxShadow: 3, fontWeight: 600 }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

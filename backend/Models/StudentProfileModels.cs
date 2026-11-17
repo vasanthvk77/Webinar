@@ -19,6 +19,8 @@ public class StudentProfileDto
     public byte? Gender { get; set; }
     public string GenderName { get; set; } = string.Empty;
     public string? ProfileUrl { get; set; }
+    public string? Year { get; set; }
+    public string? Department { get; set; }
     public string? RoleName { get; set; }
     public DateTime? CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -32,5 +34,7 @@ public class UpdateStudentProfileRequest
     public string? CountryCode { get; set; }
     public byte? Gender { get; set; }
     public string? ProfileUrl { get; set; }
+    public string? Year { get; set; }
+    public string? Department { get; set; }
 }
 

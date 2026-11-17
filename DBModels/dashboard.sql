@@ -382,6 +382,13 @@ BEGIN
         LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = @StudentCountryCode
         WHERE w.EndTime >= SYSUTCDATETIME()
           AND ISNULL(w.IsCompleted, 0) = 0
+          AND (
+              -- Free webinars are open to all students
+              w.IsPaid = 0 
+              OR 
+              -- Paid webinars are ONLY shown if admin explicitly configured a price for this student's country
+              (@StudentCountryCode IS NOT NULL AND wp.Amount IS NOT NULL AND wp.Amount > 0)
+          )
           AND NOT EXISTS (
               SELECT 1 FROM wms.WebinarRegistrations wr2 
               WHERE wr2.WebinarId = w.Id AND wr2.UserId = @StudentId

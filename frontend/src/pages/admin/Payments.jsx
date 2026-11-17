@@ -109,6 +109,26 @@ export default function Payments() {
     return filteredWebinars.reduce((sum, w) => sum + (w.registrationCount || 0), 0);
   }, [filteredWebinars]);
 
+  // Country-wise totals for currently filtered list
+  const filteredCountryTotals = useMemo(() => {
+    const map = new Map();
+    filteredWebinars.forEach((w) => {
+      if (w.isPaid && w.countryRevenues && w.countryRevenues.length > 0) {
+        w.countryRevenues.forEach((cr) => {
+          const prev = map.get(cr.countryCode) || { totalAmount: 0, registrationCount: 0 };
+          map.set(cr.countryCode, {
+            totalAmount: prev.totalAmount + (cr.totalAmount || 0),
+            registrationCount: prev.registrationCount + (cr.registrationCount || 0)
+          });
+        });
+      }
+    });
+    return Array.from(map.entries()).map(([countryCode, data]) => ({
+      countryCode,
+      ...data
+    }));
+  }, [filteredWebinars]);
+
   // Reset page when search or filter changes
   useEffect(() => {
     setPage(1);
@@ -689,21 +709,51 @@ export default function Payments() {
                         </Typography>
                       </TableCell>
 
-                      {/* Total Amount (Count * Price) */}
+                      {/* Total Amount per Currency */}
                       <TableCell align="right" sx={{ py: 2 }}>
-                        <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                          <Typography sx={{
-                            fontWeight: 850,
-                            fontSize: '16px',
-                            color: total > 0 ? (isDark ? '#34D399' : '#059669') : colors.textMuted,
-                            letterSpacing: '-0.01em'
-                          }}>
-                            {formatCurrency(total)}
-                          </Typography>
-                          {isPaid && regCount > 0 && (
-                            <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11px' }}>
-                              {regCount} {regCount === 1 ? 'paid enrollment' : 'paid enrollments'}
-                            </Typography>
+                        <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.6 }}>
+                          {isPaid && w.countryRevenues && w.countryRevenues.length > 0 ? (
+                            w.countryRevenues.map((cr) => {
+                              const sym = getCurrencySymbolFromCountryCode(cr.countryCode);
+                              const cObj = getCountryFromCode(cr.countryCode);
+                              const flag = cObj?.flag || getFlagEmoji(cObj?.iso2) || '🌐';
+                              const amt = Number(cr.totalAmount || 0);
+                              return (
+                                <Box key={cr.countryCode} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                  <Typography sx={{
+                                    fontWeight: 850,
+                                    fontSize: '15px',
+                                    color: amt > 0 ? (isDark ? '#34D399' : '#059669') : colors.textMuted,
+                                    letterSpacing: '-0.01em',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 0.5
+                                  }}>
+                                    <span style={{ fontSize: '13px' }}>{flag}</span>
+                                    {sym}{amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11px' }}>
+                                    {cr.registrationCount} {cr.registrationCount === 1 ? 'paid enrollment' : 'paid enrollments'}
+                                  </Typography>
+                                </Box>
+                              );
+                            })
+                          ) : (
+                            <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                              <Typography sx={{
+                                fontWeight: 850,
+                                fontSize: '15px',
+                                color: total > 0 ? (isDark ? '#34D399' : '#059669') : colors.textMuted,
+                                letterSpacing: '-0.01em'
+                              }}>
+                                {formatCurrency(total)}
+                              </Typography>
+                              {isPaid && regCount > 0 && (
+                                <Typography variant="caption" sx={{ color: colors.textMuted, fontSize: '11px' }}>
+                                  {regCount} {regCount === 1 ? 'paid enrollment' : 'paid enrollments'}
+                                </Typography>
+                              )}
+                            </Box>
                           )}
                         </Box>
                       </TableCell>
@@ -749,23 +799,56 @@ export default function Payments() {
               </Typography>
             </Box>
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <Typography sx={{ fontSize: '14px', fontWeight: 750, color: colors.textSecondary }}>
                 {filterType === 'all' ? 'Grand Total Payment:' : 'Filtered Total Payment:'}
               </Typography>
-              <Typography sx={{
-                fontSize: '20px',
-                fontWeight: 900,
-                color: '#D97706',
-                letterSpacing: '-0.02em',
-                bgcolor: isDark ? 'rgba(217, 119, 6, 0.15)' : '#FEF3C7',
-                px: 2,
-                py: 0.6,
-                borderRadius: 2,
-                border: '1px solid rgba(217, 119, 6, 0.3)'
-              }}>
-                {formatCurrency(filteredTotalRevenue)}
-              </Typography>
+              {filteredCountryTotals.length > 0 ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                  {filteredCountryTotals.map((ct) => {
+                    const sym = getCurrencySymbolFromCountryCode(ct.countryCode);
+                    const cObj = getCountryFromCode(ct.countryCode);
+                    const flag = cObj?.flag || getFlagEmoji(cObj?.iso2) || '🌐';
+                    const amt = Number(ct.totalAmount || 0);
+                    return (
+                      <Box
+                        key={ct.countryCode}
+                        sx={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 0.6,
+                          fontSize: '15px',
+                          fontWeight: 850,
+                          color: '#D97706',
+                          bgcolor: isDark ? 'rgba(217, 119, 6, 0.15)' : '#FEF3C7',
+                          px: 1.5,
+                          py: 0.5,
+                          borderRadius: 2,
+                          border: '1px solid rgba(217, 119, 6, 0.3)'
+                        }}
+                      >
+                        <span style={{ fontSize: '14px' }}>{flag}</span>
+                        <span>{sym}{amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.85 }}>({ct.registrationCount})</span>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              ) : (
+                <Typography sx={{
+                  fontSize: '18px',
+                  fontWeight: 900,
+                  color: '#D97706',
+                  letterSpacing: '-0.02em',
+                  bgcolor: isDark ? 'rgba(217, 119, 6, 0.15)' : '#FEF3C7',
+                  px: 2,
+                  py: 0.6,
+                  borderRadius: 2,
+                  border: '1px solid rgba(217, 119, 6, 0.3)'
+                }}>
+                  {formatCurrency(filteredTotalRevenue)}
+                </Typography>
+              )}
             </Box>
           </Box>
         )}

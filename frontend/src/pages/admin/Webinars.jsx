@@ -57,7 +57,7 @@ const EMPTY_MEETING_FORM = {
   autoStartRecording: false,
   allowStartStopRecording: true,
   logoutURL: '',
-  meetingExpireIfNoUserJoinedInMinutes: 300,
+  meetingExpireIfNoUserJoinedInMinutes: 10,
   meetingExpireWhenLastUserLeftInMinutes: 1,
   endWhenNoModerator: false,
   guestPolicy: 'ALWAYS_ACCEPT',
@@ -338,7 +338,7 @@ export default function Webinars() {
           autoStartRecording: Boolean(m.autoStartRecording),
           allowStartStopRecording: m.allowStartStopRecording !== undefined ? Boolean(m.allowStartStopRecording) : true,
           logoutURL: m.logoutURL || '',
-          meetingExpireIfNoUserJoinedInMinutes: m.meetingExpireIfNoUserJoinedInMinutes ?? 300,
+          meetingExpireIfNoUserJoinedInMinutes: m.meetingExpireIfNoUserJoinedInMinutes ?? 10,
           meetingExpireWhenLastUserLeftInMinutes: m.meetingExpireWhenLastUserLeftInMinutes ?? 1,
           endWhenNoModerator: Boolean(m.endWhenNoModerator),
           guestPolicy: m.guestPolicy || 'ALWAYS_ACCEPT',
@@ -385,7 +385,7 @@ export default function Webinars() {
         autoStartRecording: Boolean(meetingForm.autoStartRecording),
         allowStartStopRecording: Boolean(meetingForm.allowStartStopRecording),
         logoutURL: meetingForm.logoutURL?.trim() || null,
-        meetingExpireIfNoUserJoinedInMinutes: Number(meetingForm.meetingExpireIfNoUserJoinedInMinutes) || 300,
+        meetingExpireIfNoUserJoinedInMinutes: Number(meetingForm.meetingExpireIfNoUserJoinedInMinutes) || 10,
         meetingExpireWhenLastUserLeftInMinutes: Number(meetingForm.meetingExpireWhenLastUserLeftInMinutes) || 1,
         endWhenNoModerator: Boolean(meetingForm.endWhenNoModerator),
         guestPolicy: meetingForm.guestPolicy || 'ALWAYS_ACCEPT',
@@ -400,6 +400,11 @@ export default function Webinars() {
       if (res.data?.success) {
         toast.success(res.data.message || 'Meeting scheduled successfully!');
         closeModal();
+        try {
+          await load();
+        } catch {
+          // ignore refresh error
+        }
       } else {
         const errorMsg = res.data?.message || 'Failed to schedule meeting.';
         setMeetingError(errorMsg);
@@ -1784,10 +1789,11 @@ export default function Webinars() {
                 fullWidth
                 size="small"
                 type="number"
+                disabled
                 value={meetingForm.meetingExpireIfNoUserJoinedInMinutes}
-                onChange={e => setMeetingField('meetingExpireIfNoUserJoinedInMinutes', e.target.value)}
-                sx={inputSx}
-                inputProps={{ min: 1 }}
+                helperText="Auto-calculated in backend (Default: 10 mins)"
+                FormHelperTextProps={{ sx: { fontSize: '11px', color: colors.textMuted } }}
+                sx={readOnlySx}
               />
             </Box>
             <Box sx={{ flex: 1 }}>

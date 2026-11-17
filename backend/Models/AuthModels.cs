@@ -18,6 +18,8 @@ public class User
     public bool   EmailVerified  { get; set; }
     public string? CountryCode   { get; set; }
     public string? MobileNumber  { get; set; }
+    public string? Year          { get; set; }
+    public string? Department    { get; set; }
 }
 
 // -------------------------------------------------------
@@ -40,6 +42,36 @@ public class RegisterRequest
     public string Password { get; set; } = string.Empty;
     public string CountryCode { get; set; } = string.Empty;
     public string MobileNumber { get; set; } = string.Empty;
+}
+
+// -------------------------------------------------------
+// What the client sends to request an OTP
+// -------------------------------------------------------
+public class SendOtpRequest
+{
+    public string Email { get; set; } = string.Empty;
+    public byte Purpose { get; set; } = 1; // 1 = Register, 2 = ForgotPassword
+}
+
+// -------------------------------------------------------
+// What the client sends to verify an OTP
+// -------------------------------------------------------
+public class VerifyOtpRequest
+{
+    public string Email { get; set; } = string.Empty;
+    public string Otp { get; set; } = string.Empty;
+    public byte Purpose { get; set; } = 1;
+}
+
+// -------------------------------------------------------
+// OTP Settings
+// -------------------------------------------------------
+public class OtpSettings
+{
+    public int ExpirySeconds { get; set; } = 60;
+    public int MaxAttemptsPerOtp { get; set; } = 2;
+    public int MaxOtpsPerDay { get; set; } = 3;
+    public int ResetDays { get; set; } = 1;
 }
 
 // -------------------------------------------------------
@@ -77,6 +109,8 @@ public class UserDto
     public bool EmailVerified { get; set; }
     public string? CountryCode { get; set; }
     public string? MobileNumber { get; set; }
+    public string? Year { get; set; }
+    public string? Department { get; set; }
 }
 
 // -------------------------------------------------------

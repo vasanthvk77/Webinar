@@ -60,7 +60,9 @@ public class StudentProfileService : IStudentProfileService
                     MobileNumber = string.IsNullOrWhiteSpace(request.MobileNumber) ? null : request.MobileNumber.Trim(),
                     CountryCode = string.IsNullOrWhiteSpace(request.CountryCode) ? null : request.CountryCode.Trim(),
                     Gender = request.Gender,
-                    ProfileUrl = string.IsNullOrWhiteSpace(request.ProfileUrl) ? null : request.ProfileUrl.Trim()
+                    ProfileUrl = string.IsNullOrWhiteSpace(request.ProfileUrl) ? null : request.ProfileUrl.Trim(),
+                    Year = string.IsNullOrWhiteSpace(request.Year) ? null : request.Year.Trim(),
+                    Department = string.IsNullOrWhiteSpace(request.Department) ? null : request.Department.Trim()
                 },
                 commandType: CommandType.StoredProcedure
             );

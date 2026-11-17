@@ -33,7 +33,7 @@ public class ScheduleMeetingRequest
     [StringLength(1000)]
     public string? LogoutURL { get; set; }
 
-    public int MeetingExpireIfNoUserJoinedInMinutes { get; set; } = 300;
+    public int MeetingExpireIfNoUserJoinedInMinutes { get; set; } = 10;
 
     public int MeetingExpireWhenLastUserLeftInMinutes { get; set; } = 1;
 

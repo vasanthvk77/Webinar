@@ -293,16 +293,37 @@ namespace WebinarApi.Services
                     }
                 }
 
-                var joinLink = $"{_frontendUrl}/register?trackingId={webinar.ShareId}";
+                // 5. Check if Attendee Join Link already exists for this user and webinar
+                var existingJoinLink = await conn.QueryFirstOrDefaultAsync<string>(
+                    @"SELECT TOP 1 aml.JoinLink 
+                      FROM wms.AttendeeMeetingLinks aml
+                      INNER JOIN wms.WebinarRegistrations wr ON wr.Id = aml.WebinarRegistrationId
+                      WHERE wr.WebinarId = @WebinarId AND wr.UserId = @UserId",
+                    new { WebinarId = webinarId, UserId = userId }
+                );
+
+                string joinText;
+                string eventLocation;
+                if (!string.IsNullOrWhiteSpace(existingJoinLink))
+                {
+                    joinText = $"Here is your join link:\n{existingJoinLink}";
+                    eventLocation = existingJoinLink;
+                }
+                else
+                {
+                    joinText = "The meeting room has not been scheduled yet by the organizer.\nYour personalized join link will be emailed to you and this calendar event will be automatically updated with the link once scheduled.";
+                    eventLocation = "Online (Meeting link will be updated here once scheduled)";
+                }
+
                 var eventBody = new
                 {
                     summary = (string)webinar.WebinarName,
                     description = $"Webinar Session: {webinar.WebinarName}\n" +
                                   $"Instructor: {webinar.ConductorName}\n" +
                                   $"Duration: {webinar.DurationMinutes} minutes\n\n" +
-                                  $"Join Webinar Link: {joinLink}\n\n" +
+                                  $"{joinText}\n\n" +
                                   $"Scheduled via ProdesX Weblearn.",
-                    location = joinLink,
+                    location = eventLocation,
                     start = new
                     {
                         dateTime = startUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"),
@@ -358,8 +379,21 @@ namespace WebinarApi.Services
                 var htmlLink = createdDoc.RootElement.TryGetProperty("htmlLink", out var hl)
                     ? hl.GetString()
                     : null;
+                var createdEventId = createdDoc.RootElement.TryGetProperty("id", out var idProp)
+                    ? idProp.GetString()
+                    : null;
 
-                _logger.LogInformation("[GoogleCalendarService] Event created successfully for User {UserId}, Webinar {WebinarId}. Link: {Link}", userId, webinarId, htmlLink);
+                if (!string.IsNullOrWhiteSpace(createdEventId))
+                {
+                    await conn.ExecuteAsync(
+                        "wms.usp_SaveWebinarCalendarEventId",
+                        new { WebinarId = webinarId, UserId = userId, EventId = createdEventId },
+                        commandType: CommandType.StoredProcedure
+                    );
+                }
+
+                _logger.LogInformation("[GoogleCalendarService] Event created successfully for User {UserId}, Webinar {WebinarId}. Link: {Link}, EventId: {EventId}",
+                    userId, webinarId, htmlLink, createdEventId);
 
                 return new AddCalendarEventResponse
                 {
@@ -377,6 +411,101 @@ namespace WebinarApi.Services
                     Success = false,
                     Message = $"An error occurred while adding to Google Calendar: {ex.Message}"
                 };
+            }
+        }
+
+        public async Task UpdateCalendarEventsWithJoinLinkAsync(long webinarId)
+        {
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                var eventsToUpdate = (await conn.QueryAsync<dynamic>(
+                    "wms.usp_GetWebinarCalendarEventsToUpdate",
+                    new { WebinarId = webinarId },
+                    commandType: CommandType.StoredProcedure
+                )).ToList();
+
+                if (eventsToUpdate.Count == 0) return;
+
+                _logger.LogInformation("[GoogleCalendarService] Updating {Count} Google Calendar event(s) with join link for Webinar {WebinarId}...",
+                    eventsToUpdate.Count, webinarId);
+
+                var client = _httpClientFactory.CreateClient();
+
+                foreach (var ev in eventsToUpdate)
+                {
+                    try
+                    {
+                        int uId = (int)ev.UserId;
+                        string eventId = (string)ev.GoogleCalendarEventId;
+                        string joinLink = (string)ev.JoinLink;
+                        string accessToken = (string)ev.AccessToken;
+                        string? refreshToken = (string?)ev.RefreshToken;
+                        DateTime expAt = Convert.ToDateTime(ev.ExpiresAt);
+
+                        if (expAt <= DateTime.UtcNow && !string.IsNullOrWhiteSpace(refreshToken))
+                        {
+                            var refreshReq = new FormUrlEncodedContent(new Dictionary<string, string>
+                            {
+                                ["client_id"] = _options.ClientId,
+                                ["client_secret"] = _options.ClientSecret,
+                                ["refresh_token"] = refreshToken,
+                                ["grant_type"] = "refresh_token"
+                            });
+
+                            var refreshRes = await client.PostAsync(_options.TokenUri, refreshReq);
+                            if (refreshRes.IsSuccessStatusCode)
+                            {
+                                var refreshJson = await refreshRes.Content.ReadAsStringAsync();
+                                using var rDoc = JsonDocument.Parse(refreshJson);
+                                accessToken = rDoc.RootElement.GetProperty("access_token").GetString() ?? accessToken;
+                                var expSec = rDoc.RootElement.TryGetProperty("expires_in", out var eSec) ? eSec.GetInt32() : 3600;
+                                var newExpAt = DateTime.UtcNow.AddSeconds(expSec - 60);
+
+                                await conn.ExecuteAsync(
+                                    "wms.usp_UpdateUserGoogleAccessToken",
+                                    new { UserId = uId, AccessToken = accessToken, ExpiresAt = newExpAt },
+                                    commandType: CommandType.StoredProcedure
+                                );
+                            }
+                        }
+
+                        var patchBody = new
+                        {
+                            description = $"Webinar Session: {ev.WebinarName}\n" +
+                                          $"Instructor: {ev.ConductorName}\n" +
+                                          $"Duration: {ev.DurationMinutes} minutes\n\n" +
+                                          $"Here is your join link:\n{joinLink}\n\n" +
+                                          $"Scheduled via ProdesX Weblearn.",
+                            location = joinLink
+                        };
+
+                        using var patchReq = new HttpRequestMessage(
+                            HttpMethod.Patch,
+                            $"https://www.googleapis.com/calendar/v3/calendars/primary/events/{eventId}"
+                        );
+                        patchReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+                        patchReq.Content = new StringContent(JsonSerializer.Serialize(patchBody), Encoding.UTF8, "application/json");
+
+                        var patchRes = await client.SendAsync(patchReq);
+                        if (patchRes.IsSuccessStatusCode)
+                        {
+                            _logger.LogInformation("[GoogleCalendarService] Updated Google Calendar event {EventId} with join link for User {UserId}", eventId, uId);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("[GoogleCalendarService] Failed updating event {EventId}: {Status}", eventId, patchRes.StatusCode);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[GoogleCalendarService] Non-fatal exception updating Google Calendar event {EventId}: {Message}", (string)ev.GoogleCalendarEventId, ex.Message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[GoogleCalendarService] Exception in UpdateCalendarEventsWithJoinLinkAsync for Webinar {WebinarId}: {Message}", webinarId, ex.Message);
             }
         }
     }

@@ -9,8 +9,29 @@ using WebinarApi.Services;
 using WebinarApi.Hubs;
 using Serilog;
 using QuestPDF.Infrastructure;
+using QuestPDF.Drawing;
+
 // 1. Set QuestPDF License
 QuestPDF.Settings.License = LicenseType.Community;
+
+// 2. Register fonts at startup — QuestPDF 2026+ disables system fonts by default.
+//    We bundle Arial (Regular, Bold, Italic, BoldItalic) in the Fonts/ folder and
+//    register them here once, before any PDF is generated. Thread-safe, runs once.
+var fontsDir = Path.Combine(AppContext.BaseDirectory, "Fonts");
+if (Directory.Exists(fontsDir))
+{
+    foreach (var ttf in Directory.EnumerateFiles(fontsDir, "*.ttf"))
+    {
+        FontManager.RegisterFontFromFile(ttf);
+    }
+    Log.Information("[FontSetup] Registered fonts from {Dir}: {Files}",
+        fontsDir,
+        string.Join(", ", Directory.EnumerateFiles(fontsDir, "*.ttf").Select(Path.GetFileName)));
+}
+else
+{
+    Log.Warning("[FontSetup] Fonts directory not found at {Dir} — PDF text may fall back to default font", fontsDir);
+}
 
 // ── Configure Serilog before anything else ───
 Log.Logger = new LoggerConfiguration()
@@ -93,6 +114,7 @@ builder.Services.AddControllers();
 // 3.5. Register Custom Services
 // -------------------------------------------------------
 builder.Services.AddScoped<IAuthService,   AuthService>();
+builder.Services.AddScoped<IEmailService,  EmailService>();
 builder.Services.AddScoped<IAdminService,  AdminService>();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<ITabService,    TabService>();

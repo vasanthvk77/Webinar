@@ -120,3 +120,68 @@ BEGIN
     WHERE w.Id = @WebinarId;
 END
 GO
+
+-- ============================================================
+-- Ensure GoogleCalendarEventId column exists on wms.WebinarRegistrations
+-- ============================================================
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns c
+    JOIN sys.tables t ON c.object_id = t.object_id
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.name = 'WebinarRegistrations' AND s.name = 'wms' AND c.name = 'GoogleCalendarEventId'
+)
+BEGIN
+    ALTER TABLE wms.WebinarRegistrations ADD GoogleCalendarEventId NVARCHAR(250) NULL;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_SaveWebinarCalendarEventId
+-- Saves the Google Calendar event ID returned by Google API
+-- ============================================================
+CREATE OR ALTER PROCEDURE wms.usp_SaveWebinarCalendarEventId
+    @WebinarId BIGINT,
+    @UserId    INT,
+    @EventId   NVARCHAR(250)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.WebinarRegistrations
+    SET GoogleCalendarEventId = @EventId
+    WHERE WebinarId = @WebinarId AND UserId = @UserId;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetWebinarCalendarEventsToUpdate
+-- Fetches calendar events that need join link sync
+-- ============================================================
+CREATE OR ALTER PROCEDURE wms.usp_GetWebinarCalendarEventsToUpdate
+    @WebinarId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        wr.UserId,
+        wr.GoogleCalendarEventId,
+        aml.JoinLink,
+        w.WebinarName,
+        w.ConductorName,
+        w.DurationMinutes,
+        w.StartTime,
+        w.EndTime,
+        ugt.AccessToken,
+        ugt.RefreshToken,
+        ugt.ExpiresAt
+    FROM wms.WebinarRegistrations wr
+    INNER JOIN wms.AttendeeMeetingLinks aml ON aml.WebinarRegistrationId = wr.Id
+    INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    INNER JOIN wms.UserGoogleTokens ugt ON ugt.UserId = wr.UserId
+    WHERE wr.WebinarId = @WebinarId
+      AND wr.GoogleCalendarEventId IS NOT NULL
+      AND aml.JoinLink IS NOT NULL;
+END
+GO
+

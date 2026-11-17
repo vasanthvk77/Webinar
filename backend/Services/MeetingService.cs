@@ -22,21 +22,29 @@ public class MeetingService : IMeetingService
     private readonly string _connectionString;
     private readonly ILogger<MeetingService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IGoogleCalendarService _googleCalendarService;
     private readonly string _sharedSecret;
     private readonly string _createMeetingApi;
     private readonly string _joinMeetingApi;
     private readonly string _serverToServerUrl;
+    private readonly int _gracePeriodInMinutes;
 
-    public MeetingService(IConfiguration config, IHttpClientFactory httpClientFactory, ILogger<MeetingService> logger)
+    public MeetingService(
+        IConfiguration config,
+        IHttpClientFactory httpClientFactory,
+        ILogger<MeetingService> logger,
+        IGoogleCalendarService googleCalendarService)
     {
         _connectionString = config.GetConnectionString("DefaultConnection")
                          ?? throw new InvalidOperationException("Connection string not configured.");
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _googleCalendarService = googleCalendarService;
         _sharedSecret = config["BBB:SharedSecret"]?.Trim() ?? string.Empty;
         _createMeetingApi = config["BBB:CreateMeetingApi"]?.Trim() ?? string.Empty;
         _joinMeetingApi = config["BBB:JoinMeetingApi"]?.Trim() ?? string.Empty;
         _serverToServerUrl = (config["BBB:ServerToServerUrl"] ?? config["BBB:EndedURL"] ?? string.Empty).Trim();
+        _gracePeriodInMinutes = config.GetValue<int>("MeetingScheduleChecker:GracePeriodInMinutes", 5);
     }
 
     public async Task<(bool success, string message, MeetingDto? meeting)> ScheduleMeetingAsync(ScheduleMeetingRequest request, int userId)
@@ -63,6 +71,27 @@ public class MeetingService : IMeetingService
 
             using var conn = new SqlConnection(_connectionString);
 
+            // Fetch Webinar details for UTC timing calculation
+            var webinar = await conn.QueryFirstOrDefaultAsync<WebinarScheduleInfo>(
+                "SELECT Id, WebinarName, StartTime, EndTime, ConductorName, CreatedBy FROM wms.Webinars WHERE Id = @WebinarId",
+                new { WebinarId = request.WebinarId }
+            );
+
+            if (webinar == null)
+                return (false, "Webinar record not found.", null);
+
+            // Industry-standard UTC calculation: StartTime UTC + GracePeriod - ScheduleTime (Now UTC)
+            var startTimeUtc = DateTime.SpecifyKind(webinar.StartTime, DateTimeKind.Utc);
+            var nowUtc = DateTime.UtcNow;
+            var deadlineUtc = startTimeUtc.AddMinutes(_gracePeriodInMinutes);
+            var diffMinutes = (int)Math.Ceiling((deadlineUtc - nowUtc).TotalMinutes);
+
+            // Apply safety floor: Minimum 10 minutes
+            int calculatedExpiryMinutes = Math.Max(diffMinutes, 10);
+
+            _logger.LogInformation("[MeetingService] Schedule timing calculation: Webinar Start UTC = {Start:yyyy-MM-dd HH:mm:ss}, Grace = {Grace}m, Now UTC = {Now:yyyy-MM-dd HH:mm:ss}, Calculated Expiry = {Expiry}m",
+                startTimeUtc, _gracePeriodInMinutes, nowUtc, calculatedExpiryMinutes);
+
             var parameters = new DynamicParameters();
             parameters.Add("@WebinarId", request.WebinarId);
             parameters.Add("@MeetingID", request.MeetingID.Trim());
@@ -73,7 +102,7 @@ public class MeetingService : IMeetingService
             parameters.Add("@AutoStartRecording", request.AutoStartRecording);
             parameters.Add("@AllowStartStopRecording", request.AllowStartStopRecording);
             parameters.Add("@LogoutURL", string.IsNullOrWhiteSpace(request.LogoutURL) ? null : request.LogoutURL.Trim());
-            parameters.Add("@MeetingExpireIfNoUserJoinedInMinutes", request.MeetingExpireIfNoUserJoinedInMinutes);
+            parameters.Add("@MeetingExpireIfNoUserJoinedInMinutes", calculatedExpiryMinutes);
             parameters.Add("@MeetingExpireWhenLastUserLeftInMinutes", request.MeetingExpireWhenLastUserLeftInMinutes);
             parameters.Add("@EndWhenNoModerator", request.EndWhenNoModerator);
             parameters.Add("@GuestPolicy", string.IsNullOrWhiteSpace(request.GuestPolicy) ? "ALWAYS_ACCEPT" : request.GuestPolicy.Trim());
@@ -95,10 +124,43 @@ public class MeetingService : IMeetingService
                 return (false, "Failed to schedule meeting.", null);
             }
 
-            _logger.LogInformation("[MeetingService] Meeting scheduled successfully with Id: {MeetingId} for Webinar: {WebinarId}",
-                savedMeeting.Id, request.WebinarId);
+            // Immediately create the BigBlueButton meeting session upon schedule
+            var conductorName = (string?)webinar.ConductorName;
+            var (createdOnBbb, moderatorJoinUrl) = await CallBbbCreateMeetingInternalAsync(
+                savedMeeting.Id,
+                savedMeeting.WebinarId,
+                savedMeeting.MeetingID,
+                savedMeeting.Name,
+                savedMeeting.MaxParticipants,
+                savedMeeting.Duration,
+                savedMeeting.Record,
+                savedMeeting.AutoStartRecording,
+                savedMeeting.AllowStartStopRecording,
+                calculatedExpiryMinutes,
+                savedMeeting.MeetingExpireWhenLastUserLeftInMinutes,
+                savedMeeting.EndWhenNoModerator,
+                savedMeeting.GuestPolicy,
+                savedMeeting.MuteOnStart,
+                savedMeeting.MeetingLayout,
+                savedMeeting.LogoutURL,
+                savedMeeting.LockSettingsPresenterPolicy,
+                savedMeeting.ModeratorPW,
+                savedMeeting.AttendeePW,
+                conductorName,
+                conn
+            );
 
-            return (true, "Meeting scheduled successfully.", savedMeeting);
+            if (createdOnBbb && !string.IsNullOrWhiteSpace(moderatorJoinUrl))
+            {
+                savedMeeting.IsMeetingCreated = true;
+                savedMeeting.ModeratorJoinUrl = moderatorJoinUrl;
+                savedMeeting.MeetingCreatedAt = DateTime.UtcNow;
+            }
+
+            _logger.LogInformation("[MeetingService] Meeting scheduled and BBB session processed (Created: {Created}) for Webinar: {WebinarId}",
+                createdOnBbb, request.WebinarId);
+
+            return (true, "Meeting scheduled and created successfully.", savedMeeting);
         }
         catch (SqlException ex)
         {
@@ -154,36 +216,101 @@ public class MeetingService : IMeetingService
                 return (false, "No scheduled meeting configuration found for this webinar.", null);
             }
 
-            // Ensure meeting session is active/created on BigBlueButton
+            var (success, newModeratorJoinUrl) = await CallBbbCreateMeetingInternalAsync(
+                meeting.Id,
+                meeting.WebinarId,
+                meeting.MeetingID,
+                meeting.Name,
+                meeting.MaxParticipants,
+                meeting.Duration,
+                meeting.Record,
+                meeting.AutoStartRecording,
+                meeting.AllowStartStopRecording,
+                meeting.MeetingExpireIfNoUserJoinedInMinutes,
+                meeting.MeetingExpireWhenLastUserLeftInMinutes,
+                meeting.EndWhenNoModerator,
+                meeting.GuestPolicy,
+                meeting.MuteOnStart,
+                meeting.MeetingLayout,
+                meeting.LogoutURL,
+                meeting.LockSettingsPresenterPolicy,
+                meeting.ModeratorPW,
+                meeting.AttendeePW,
+                meeting.ConductorName,
+                conn
+            );
+
+            if (!success || string.IsNullOrWhiteSpace(newModeratorJoinUrl))
+            {
+                return (false, "Failed to regenerate moderator link on BigBlueButton.", null);
+            }
+
+            _logger.LogInformation("[MeetingService] Successfully regenerated moderator link for WebinarId: {WebinarId}, MeetingID: {MeetingID}",
+                webinarId, meeting.MeetingID);
+
+            return (true, "Moderator link regenerated successfully.", newModeratorJoinUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MeetingService] Exception in RegenerateModeratorLinkAsync: {Message}", ex.Message);
+            return (false, "An error occurred while regenerating the moderator link: " + ex.Message, null);
+        }
+    }
+
+    private async Task<(bool success, string? moderatorJoinUrl)> CallBbbCreateMeetingInternalAsync(
+        long meetingId,
+        long webinarId,
+        string meetingID,
+        string name,
+        int maxParticipants,
+        int duration,
+        bool record,
+        bool autoStartRecording,
+        bool allowStartStopRecording,
+        int expireIfNoUserJoined,
+        int expireWhenLastUserLeft,
+        bool endWhenNoModerator,
+        string guestPolicy,
+        bool muteOnStart,
+        string meetingLayout,
+        string? logoutURL,
+        string? lockSettingsPresenterPolicy,
+        string? moderatorPW,
+        string? attendeePW,
+        string? conductorName,
+        SqlConnection conn)
+    {
+        try
+        {
             var parameters = new List<KeyValuePair<string, string>>
             {
-                new("name", meeting.Name.Trim()),
-                new("meetingID", meeting.MeetingID.Trim()),
-                new("maxParticipants", meeting.MaxParticipants.ToString()),
-                new("duration", meeting.Duration.ToString()),
-                new("record", meeting.Record ? "true" : "false"),
-                new("autoStartRecording", meeting.AutoStartRecording ? "true" : "false"),
-                new("allowStartStopRecording", meeting.AllowStartStopRecording ? "true" : "false"),
-                new("meetingExpireIfNoUserJoinedInMinutes", meeting.MeetingExpireIfNoUserJoinedInMinutes.ToString()),
-                new("meetingExpireWhenLastUserLeftInMinutes", meeting.MeetingExpireWhenLastUserLeftInMinutes.ToString()),
-                new("endWhenNoModerator", meeting.EndWhenNoModerator ? "true" : "false"),
-                new("guestPolicy", meeting.GuestPolicy),
-                new("muteOnStart", meeting.MuteOnStart ? "true" : "false"),
-                new("meetingLayout", meeting.MeetingLayout),
-                new("meta_webinarId", meeting.WebinarId.ToString())
+                new("name", name.Trim()),
+                new("meetingID", meetingID.Trim()),
+                new("maxParticipants", maxParticipants.ToString()),
+                new("duration", duration.ToString()),
+                new("record", record ? "true" : "false"),
+                new("autoStartRecording", autoStartRecording ? "true" : "false"),
+                new("allowStartStopRecording", allowStartStopRecording ? "true" : "false"),
+                new("meetingExpireIfNoUserJoinedInMinutes", expireIfNoUserJoined.ToString()),
+                new("meetingExpireWhenLastUserLeftInMinutes", expireWhenLastUserLeft.ToString()),
+                new("endWhenNoModerator", endWhenNoModerator ? "true" : "false"),
+                new("guestPolicy", string.IsNullOrWhiteSpace(guestPolicy) ? "ALWAYS_ACCEPT" : guestPolicy.Trim()),
+                new("muteOnStart", muteOnStart ? "true" : "false"),
+                new("meetingLayout", string.IsNullOrWhiteSpace(meetingLayout) ? "UNIFIED_LAYOUT" : meetingLayout.Trim()),
+                new("meta_webinarId", webinarId.ToString())
             };
 
-            if (!string.IsNullOrWhiteSpace(meeting.LogoutURL))
-                parameters.Add(new("logoutURL", meeting.LogoutURL.Trim()));
+            if (!string.IsNullOrWhiteSpace(logoutURL))
+                parameters.Add(new("logoutURL", logoutURL.Trim()));
 
-            if (!string.IsNullOrWhiteSpace(meeting.LockSettingsPresenterPolicy))
-                parameters.Add(new("lockSettingsPresenterPolicy", meeting.LockSettingsPresenterPolicy.Trim()));
+            if (!string.IsNullOrWhiteSpace(lockSettingsPresenterPolicy))
+                parameters.Add(new("lockSettingsPresenterPolicy", lockSettingsPresenterPolicy.Trim()));
 
-            if (!string.IsNullOrWhiteSpace(meeting.ModeratorPW))
-                parameters.Add(new("moderatorPW", meeting.ModeratorPW.Trim()));
+            if (!string.IsNullOrWhiteSpace(moderatorPW))
+                parameters.Add(new("moderatorPW", moderatorPW.Trim()));
 
-            if (!string.IsNullOrWhiteSpace(meeting.AttendeePW))
-                parameters.Add(new("attendeePW", meeting.AttendeePW.Trim()));
+            if (!string.IsNullOrWhiteSpace(attendeePW))
+                parameters.Add(new("attendeePW", attendeePW.Trim()));
 
             if (!string.IsNullOrWhiteSpace(_serverToServerUrl) && !_serverToServerUrl.Equals("nothing now yet", StringComparison.OrdinalIgnoreCase))
             {
@@ -213,22 +340,21 @@ public class MeetingService : IMeetingService
             {
                 var messageKey = xdoc.Root?.Element("messageKey")?.Value;
                 var message = xdoc.Root?.Element("message")?.Value ?? "Failed to create/verify meeting on BigBlueButton.";
-                _logger.LogWarning("[MeetingService] BBB create failed during regenerate for MeetingID '{MeetingID}': {Code} - {Msg}",
-                    meeting.MeetingID, messageKey, message);
-                return (false, $"BigBlueButton response: {messageKey} - {message}", null);
+                _logger.LogWarning("[MeetingService] BBB create failed for MeetingID '{MeetingID}': {Code} - {Msg}",
+                    meetingID, messageKey, message);
+                return (false, null);
             }
 
-            // Generate fresh Moderator Join URL
-            var moderatorPw = !string.IsNullOrWhiteSpace(meeting.ModeratorPW)
-                ? meeting.ModeratorPW
+            var actualModeratorPw = !string.IsNullOrWhiteSpace(moderatorPW)
+                ? moderatorPW
                 : xdoc.Root?.Element("moderatorPW")?.Value ?? "mp";
 
-            var adminFullName = string.IsNullOrWhiteSpace(meeting.ConductorName) ? "Admin Moderator" : meeting.ConductorName;
+            var adminFullName = string.IsNullOrWhiteSpace(conductorName) ? "Admin Moderator" : conductorName;
             var joinParams = new List<KeyValuePair<string, string>>
             {
                 new("fullName", adminFullName),
-                new("meetingID", meeting.MeetingID),
-                new("password", moderatorPw),
+                new("meetingID", meetingID),
+                new("password", actualModeratorPw),
                 new("redirect", "true")
             };
 
@@ -240,44 +366,70 @@ public class MeetingService : IMeetingService
             var joinChecksum = Convert.ToHexString(sha1Join.ComputeHash(Encoding.UTF8.GetBytes(joinDataToHash))).ToLowerInvariant();
             var newModeratorJoinUrl = $"{_joinMeetingApi}?{joinQuery}&checksum={joinChecksum}";
 
-            // Update database: replace ModeratorJoinUrl in both wms.Meetings and wms.Webinars
             var nowUtc = DateTime.UtcNow;
             await conn.ExecuteAsync(
                 "wms.usp_MarkMeetingCreated",
-                new { Id = meeting.Id, MeetingCreatedAt = nowUtc, ModeratorJoinUrl = newModeratorJoinUrl },
+                new { Id = meetingId, MeetingCreatedAt = nowUtc, ModeratorJoinUrl = newModeratorJoinUrl },
                 commandType: CommandType.StoredProcedure
             );
 
-            // Synchronize attendee links for this webinar as well
-            await SyncAttendeeLinksInternalAsync(meeting, conn);
+            // Synchronize attendee links for this webinar
+            await SyncAttendeeLinksInternalAsync(meetingId, webinarId, meetingID, attendeePW, conn);
 
-            _logger.LogInformation("[MeetingService] Successfully regenerated moderator link for WebinarId: {WebinarId}, MeetingID: {MeetingID}",
-                webinarId, meeting.MeetingID);
+            // Queue personalized meeting join emails
+            try
+            {
+                await conn.QueryFirstOrDefaultAsync<dynamic>(
+                    "wms.sp_QueueAttendeeMeetingJoinEmails",
+                    new { MeetingId = meetingId, WebinarId = webinarId },
+                    commandType: CommandType.StoredProcedure
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[MeetingService] Non-fatal exception queueing meeting join emails: {Message}", ex.Message);
+            }
 
-            return (true, "Moderator link regenerated successfully.", newModeratorJoinUrl);
+            // Sync Google Calendar events with the new join link
+            try
+            {
+                await _googleCalendarService.UpdateCalendarEventsWithJoinLinkAsync(webinarId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[MeetingService] Non-fatal exception updating Google Calendar events: {Message}", ex.Message);
+            }
+
+            return (true, newModeratorJoinUrl);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[MeetingService] Exception in RegenerateModeratorLinkAsync: {Message}", ex.Message);
-            return (false, "An error occurred while regenerating the moderator link: " + ex.Message, null);
+            _logger.LogWarning(ex, "[MeetingService] Exception in CallBbbCreateMeetingInternalAsync for MeetingID '{MeetingID}': {Message}",
+                meetingID, ex.Message);
+            return (false, null);
         }
     }
 
-    private async Task SyncAttendeeLinksInternalAsync(PendingMeetingScheduleDto meeting, SqlConnection conn)
+    private async Task SyncAttendeeLinksInternalAsync(
+        long meetingId,
+        long webinarId,
+        string meetingID,
+        string? meetingAttendeePW,
+        SqlConnection conn)
     {
         try
         {
             var attendees = (await conn.QueryAsync<AttendeeMeetingParamDto>(
                 "wms.sp_GetWebinarRegistartionsMeetingParams",
-                new { WebinarId = meeting.WebinarId },
+                new { WebinarId = webinarId },
                 commandType: CommandType.StoredProcedure
             )).ToList();
 
             var missingAttendees = attendees.Where(a => !a.HasLink || string.IsNullOrWhiteSpace(a.ExistingJoinLink)).ToList();
             if (missingAttendees.Count == 0) return;
 
-            var attendeePw = !string.IsNullOrWhiteSpace(meeting.AttendeePW)
-                ? meeting.AttendeePW
+            var attendeePw = !string.IsNullOrWhiteSpace(meetingAttendeePW)
+                ? meetingAttendeePW
                 : (!string.IsNullOrWhiteSpace(attendees[0].AttendeePW) ? attendees[0].AttendeePW : "ap");
 
             foreach (var student in missingAttendees)
@@ -289,7 +441,7 @@ public class MeetingService : IMeetingService
                 var joinParams = new List<KeyValuePair<string, string>>
                 {
                     new("fullName", studentName),
-                    new("meetingID", meeting.MeetingID),
+                    new("meetingID", meetingID),
                     new("password", attendeePw),
                     new("redirect", "true")
                 };
@@ -311,7 +463,7 @@ public class MeetingService : IMeetingService
                     "wms.sp_StoreAttendeeLink",
                     new
                     {
-                        MeetingId = meeting.Id,
+                        MeetingId = meetingId,
                         WebinarRegistrationId = student.WebinarRegistrationId,
                         JoinLink = attendeeJoinUrl,
                         IsCreatedLink = true
@@ -524,6 +676,16 @@ public class MeetingService : IMeetingService
             meetingId, recordedCount);
 
         return (true, $"Recorded {recordedCount} student attendance record(s).", recordedCount);
+    }
+
+    private class WebinarScheduleInfo
+    {
+        public long Id { get; set; }
+        public string WebinarName { get; set; } = string.Empty;
+        public DateTime StartTime { get; set; }
+        public DateTime EndTime { get; set; }
+        public string? ConductorName { get; set; }
+        public int? CreatedBy { get; set; }
     }
 }
 

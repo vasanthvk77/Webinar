@@ -2,6 +2,9 @@ using Microsoft.IdentityModel.Tokens;
 using System.Data;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Net;
+using System.Net.Mail;
 using System.Text;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -15,6 +18,8 @@ namespace WebinarApi.Services
         Task<(bool success, string message, UserDto user, string token)> RegisterAsync(RegisterRequest request);
         Task<(bool success, string message, UserDto user, string token)> LoginAsync(LoginRequest request);
         Task<(bool success, string message, UserDto user, string token)> GoogleLoginAsync(GoogleTokenRequest request);
+        Task<(bool success, string message, int? remainingDailyOtps, int expiresInSeconds)> SendRegistrationOtpAsync(string email);
+        Task<(bool success, string message)> VerifyRegistrationOtpAsync(string email, string otp);
     }
 
     public class AuthService : IAuthService
@@ -23,8 +28,9 @@ namespace WebinarApi.Services
         private readonly string         _connectionString;
         private readonly ILogger<AuthService> _logger;
         private readonly IActivityLogService  _activityLog;
+        private readonly IEmailService        _emailService;
 
-        public AuthService(IConfiguration config, ILogger<AuthService> logger, IActivityLogService activityLog)
+        public AuthService(IConfiguration config, ILogger<AuthService> logger, IActivityLogService activityLog, IEmailService emailService)
         {
             _config           = config;
             _connectionString = config.GetConnectionString("DefaultConnection")
@@ -32,6 +38,7 @@ namespace WebinarApi.Services
                              ?? throw new InvalidOperationException("Connection string not configured.");
             _logger = logger;
             _activityLog = activityLog;
+            _emailService = emailService;
         }
 
         // -------------------------------------------------------
@@ -76,6 +83,19 @@ namespace WebinarApi.Services
                     return provider == "Local"
                         ? (false, "An account with this email already exists. Please log in.", null!, null!)
                         : (false, $"This email is already registered with {provider}.", null!, null!);
+                }
+
+                // 1.5. Guard: Ensure email was verified via OTP within last 15 minutes
+                var verifiedOtpId = await conn.ExecuteScalarAsync<long?>(
+                    "wms.usp_CheckEmailOtpVerified",
+                    new { Email = email, Purpose = (byte)1 },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                if (verifiedOtpId == null || verifiedOtpId == 0)
+                {
+                    _logger.LogWarning("[Auth] Register blocked for {Email} — email OTP not verified.", email);
+                    return (false, "Please verify your email with OTP before creating an account.", null!, null!);
                 }
 
                 // 2. Hash password — BCrypt done in C#, never in SQL
@@ -294,6 +314,189 @@ namespace WebinarApi.Services
             {
                 _logger.LogError(ex, "[Auth] Google login EXCEPTION: {Message}", ex.Message);
                 return (false, $"Google authentication error: {ex.Message}", null!, null!);
+            }
+        }
+
+        // -------------------------------------------------------
+        // Send OTP for Registration
+        // -------------------------------------------------------
+        public async Task<(bool success, string message, int? remainingDailyOtps, int expiresInSeconds)> SendRegistrationOtpAsync(string email)
+        {
+            email = email?.Trim().ToLower() ?? "";
+            _logger.LogInformation("[Auth] SendRegistrationOtp attempt for email: {Email}", email);
+
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                return (false, "Email is required.", null, 0);
+            }
+
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+
+                // 1. Check if user already exists
+                var existing = await conn.QueryFirstOrDefaultAsync<dynamic>(
+                    "wms.usp_CheckEmailExists",
+                    new { Email = email },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                if (existing != null)
+                {
+                    string provider = (string)existing.AuthProvider;
+                    return provider == "Local"
+                        ? (false, "An account with this email already exists. Please log in.", null, 0)
+                        : (false, $"This email is already registered with {provider}.", null, 0);
+                }
+
+                // 2. Read configuration
+                int expirySeconds = _config.GetValue<int>("OtpSettings:ExpirySeconds", 60);
+                int maxOtpsPerDay = _config.GetValue<int>("OtpSettings:MaxOtpsPerDay", 3);
+                int resetDays     = _config.GetValue<int>("OtpSettings:ResetDays", 1);
+
+                // 3. Check daily/resetDays limit
+                int dailyCount = await conn.ExecuteScalarAsync<int>(
+                    "wms.usp_GetDailyOtpCount",
+                    new { Email = email, Purpose = (byte)1, ResetDays = resetDays },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                if (dailyCount >= maxOtpsPerDay)
+                {
+                    _logger.LogWarning("[Auth] OTP limit ({Limit}) reached for {Email}.", maxOtpsPerDay, email);
+                    return (false, $"OTP generation limit reached ({maxOtpsPerDay}/{maxOtpsPerDay}). Please try again later.", 0, 0);
+                }
+
+                // 4. Generate 6-digit OTP & SHA-256 hash
+                string otp = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+                byte[] otpHash = SHA256.HashData(Encoding.UTF8.GetBytes(otp));
+
+                // 5. Set expiration with a 15-second transit buffer so user gets full 60 seconds
+                DateTime expiresAt = DateTime.UtcNow.AddSeconds(expirySeconds + 15);
+
+                // 6. Store in wms.EmailOtpVerifications
+                await conn.ExecuteAsync(
+                    "wms.usp_SaveEmailOtp",
+                    new
+                    {
+                        Email = email,
+                        OtpHash = otpHash,
+                        Purpose = (byte)1,
+                        ExpiresAt = expiresAt
+                    },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                // 7. Asynchronously dispatch the email in background so the UI response is instantaneous (<50ms)
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _emailService.SendOtpEmailAsync(email, otp, expirySeconds);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "[Auth] Background OTP email dispatch failed for {Email}: {Message}", email, ex.Message);
+                    }
+                });
+
+                int remaining = maxOtpsPerDay - (dailyCount + 1);
+                _logger.LogInformation("[Auth] OTP sent successfully to {Email}. Remaining daily OTPs: {Remaining}", email, remaining);
+                return (true, "Verification code sent to your email.", remaining, expirySeconds);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Auth] SendRegistrationOtp EXCEPTION for {Email}: {Message}", email, ex.Message);
+                return (false, "An error occurred while sending verification code.", null, 0);
+            }
+        }
+
+        // -------------------------------------------------------
+        // Verify OTP for Registration
+        // -------------------------------------------------------
+        public async Task<(bool success, string message)> VerifyRegistrationOtpAsync(string email, string otp)
+        {
+            email = email?.Trim().ToLower() ?? "";
+            otp = otp?.Trim() ?? "";
+            _logger.LogInformation("[Auth] VerifyRegistrationOtp attempt for email: {Email}", email);
+
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(otp))
+            {
+                return (false, "Email and OTP code are required.");
+            }
+
+            try
+            {
+                using var conn = new SqlConnection(_connectionString);
+                await conn.OpenAsync();
+
+                int maxAttempts = _config.GetValue<int>("OtpSettings:MaxAttemptsPerOtp", 2);
+
+                var record = await conn.QueryFirstOrDefaultAsync<dynamic>(
+                    "wms.usp_GetLatestEmailOtp",
+                    new { Email = email, Purpose = (byte)1 },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                if (record == null)
+                {
+                    return (false, "No OTP request found for this email. Please request a new OTP.");
+                }
+
+                if ((bool)record.IsUsed)
+                {
+                    return (false, "This OTP has already been used. Please request a new OTP.");
+                }
+
+                int failedAttempts = (int)record.FailedAttempts;
+                if (failedAttempts >= maxAttempts)
+                {
+                    return (false, "Maximum OTP verification attempts exceeded. Please request a new OTP.");
+                }
+
+                DateTime expiresAt = (DateTime)record.ExpiresAt;
+                if (DateTime.UtcNow > expiresAt)
+                {
+                    return (false, "OTP has expired. Please request a new OTP.");
+                }
+
+                byte[] enteredHash = SHA256.HashData(Encoding.UTF8.GetBytes(otp));
+                byte[] storedHash = (byte[])record.OtpHash;
+
+                if (!CryptographicOperations.FixedTimeEquals(enteredHash, storedHash))
+                {
+                    int newFailedAttempts = await conn.ExecuteScalarAsync<int>(
+                        "wms.usp_IncrementOtpFailedAttempts",
+                        new { Id = (long)record.Id },
+                        commandType: CommandType.StoredProcedure
+                    );
+
+                    _logger.LogWarning("[Auth] Incorrect OTP for {Email}. Failed attempts: {Count}/{Max}", email, newFailedAttempts, maxAttempts);
+
+                    if (newFailedAttempts >= maxAttempts)
+                    {
+                        return (false, "Maximum OTP verification attempts exceeded. Please request a new OTP.");
+                    }
+
+                    int remainingAttempts = maxAttempts - newFailedAttempts;
+                    return (false, $"Incorrect OTP. You have {remainingAttempts} attempt remaining.");
+                }
+
+                // Correct OTP -> mark as used
+                await conn.ExecuteAsync(
+                    "wms.usp_MarkEmailOtpUsed",
+                    new { Id = (long)record.Id },
+                    commandType: CommandType.StoredProcedure
+                );
+
+                _logger.LogInformation("[Auth] OTP verified successfully for {Email}", email);
+                return (true, "Email verified successfully.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Auth] VerifyRegistrationOtp EXCEPTION for {Email}: {Message}", email, ex.Message);
+                return (false, "An error occurred while verifying the OTP code.");
             }
         }
 

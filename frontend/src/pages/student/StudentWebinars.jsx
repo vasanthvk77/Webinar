@@ -743,7 +743,7 @@ export default function StudentWebinars() {
                       }
                       secondaryLabel="Details"
                       onSecondaryClick={() => setDetailsModalWebinar(w)}
-                      onCalendarClick={() => handleAddToCalendar(w)}
+                      onCalendarClick={isStartTimePast ? undefined : () => handleAddToCalendar(w)}
                       onShareClick={isStartTimePast ? undefined : (e) => handleCopyLink(w.shareId, e)}
                     />
                   </Box>
@@ -752,7 +752,11 @@ export default function StudentWebinars() {
 
               // ── Tab 2: Registered Webinars ──
               if (activeTab === 'registered') {
-                const canJoinNow = timing.type === 'LIVE' || timing.type === 'TODAY';
+                const isMeetingReady = Boolean(w.isMeetingCreated);
+                const now = new Date();
+                const start = w.startTime ? new Date(w.startTime) : null;
+                const isWithinJoinWindow = start && !isNaN(start.getTime()) && (now >= new Date(start.getTime() - 15 * 60 * 1000));
+                const canJoinNow = isMeetingReady && !isSessionEnded && (timing.type === 'LIVE' || isWithinJoinWindow);
                 
                 // EXACT USER LOGIC:
                 // 1) If registered and session ended (EndTime < Current) AND NOT attended/completed in WebinarCompleted:
@@ -792,10 +796,14 @@ export default function StudentWebinars() {
                           ? 'Join Webinar'
                           : 'Session Details'
                       }
-                      onPrimaryClick={() => setDetailsModalWebinar(w)}
+                      onPrimaryClick={
+                        canJoinNow && (w.attendeeJoinUrl || w.joinLink)
+                          ? () => window.open(w.attendeeJoinUrl || w.joinLink, '_blank')
+                          : () => setDetailsModalWebinar(w)
+                      }
                       secondaryLabel="Details"
                       onSecondaryClick={() => setDetailsModalWebinar(w)}
-                      onCalendarClick={() => handleAddToCalendar(w)}
+                      onCalendarClick={isStartTimePast ? undefined : () => handleAddToCalendar(w)}
                       onShareClick={isStartTimePast ? undefined : (e) => handleCopyLink(w.shareId, e)}
                     />
                   </Box>
@@ -987,22 +995,24 @@ export default function StudentWebinars() {
 
             {/* Quick Actions in Modal */}
             <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<CalendarMonthIcon />}
-                onClick={() => handleAddToCalendar(detailsModalWebinar)}
-                sx={{
-                  borderRadius: '10px',
-                  borderColor: '#FED7AA',
-                  color: '#EA580C',
-                  fontWeight: 700,
-                  textTransform: 'none',
-                  '&:hover': { bgcolor: '#FFF7ED', borderColor: '#EA580C' },
-                }}
-              >
-                Add to Calendar
-              </Button>
+              {!isWebinarStartTimePast(detailsModalWebinar.startTime) && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<CalendarMonthIcon />}
+                  onClick={() => handleAddToCalendar(detailsModalWebinar)}
+                  sx={{
+                    borderRadius: '10px',
+                    borderColor: '#FED7AA',
+                    color: '#EA580C',
+                    fontWeight: 700,
+                    textTransform: 'none',
+                    '&:hover': { bgcolor: '#FFF7ED', borderColor: '#EA580C' },
+                  }}
+                >
+                  Add to Calendar
+                </Button>
+              )}
               {!isWebinarStartTimePast(detailsModalWebinar.startTime) && (
                 <Button
                   variant="outlined"

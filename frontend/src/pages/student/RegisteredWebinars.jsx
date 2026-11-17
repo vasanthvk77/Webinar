@@ -338,7 +338,11 @@ export default function RegisteredWebinars() {
                     onPrimaryClick={() => setJoinModalWebinar(w)}
                     secondaryLabel="Details"
                     onSecondaryClick={() => setJoinModalWebinar(w)}
-                    onCalendarClick={() => handleAddToCalendar(w)}
+                    onCalendarClick={
+                      isWebinarStartTimePast(w.startTime)
+                        ? undefined
+                        : () => handleAddToCalendar(w)
+                    }
                     onShareClick={
                       isWebinarStartTimePast(w.startTime)
                         ? undefined
@@ -506,23 +510,25 @@ export default function RegisteredWebinars() {
               Close
             </Button>
 
-            <Button
-              variant="contained"
-              startIcon={<EventIcon />}
-              onClick={() => handleAddToCalendar(joinModalWebinar)}
-              sx={{
-                bgcolor: '#F1F5F9',
-                color: '#0F172A',
-                border: '1px solid #CBD5E1',
-                fontWeight: 700,
-                textTransform: 'none',
-                borderRadius: '10px',
-                boxShadow: 'none',
-                '&:hover': { bgcolor: '#E2E8F0', boxShadow: 'none' }
-              }}
-            >
-              Add to Calendar
-            </Button>
+            {!isWebinarStartTimePast(joinModalWebinar.startTime) && (
+              <Button
+                variant="contained"
+                startIcon={<EventIcon />}
+                onClick={() => handleAddToCalendar(joinModalWebinar)}
+                sx={{
+                  bgcolor: '#F1F5F9',
+                  color: '#0F172A',
+                  border: '1px solid #CBD5E1',
+                  fontWeight: 700,
+                  textTransform: 'none',
+                  borderRadius: '10px',
+                  boxShadow: 'none',
+                  '&:hover': { bgcolor: '#E2E8F0', boxShadow: 'none' }
+                }}
+              >
+                Add to Calendar
+              </Button>
+            )}
 
             <Button
               variant="contained"

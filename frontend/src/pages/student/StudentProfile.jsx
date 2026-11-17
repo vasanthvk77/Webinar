@@ -4,11 +4,9 @@ import {
   Typography,
   TextField,
   Button,
-  Avatar,
   IconButton,
   Chip,
   Grid,
-  MenuItem,
   CircularProgress,
   Tooltip,
   Paper,
@@ -20,29 +18,63 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import SchoolIcon from '@mui/icons-material/School';
-import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
-import AccessTimeFilledIcon from '@mui/icons-material/AccessTimeFilled';
-import HowToRegIcon from '@mui/icons-material/HowToReg';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import MaleIcon from '@mui/icons-material/Male';
 import FemaleIcon from '@mui/icons-material/Female';
 import TransgenderIcon from '@mui/icons-material/Transgender';
+import EventNoteOutlinedIcon from '@mui/icons-material/EventNoteOutlined';
+import TaskAltIcon from '@mui/icons-material/TaskAlt';
+import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import toast from 'react-hot-toast';
 
 import { useAuth } from '../../context/AuthContext';
 import { useThemeColors, useAppTheme } from '../../context/ThemeContext';
 import { studentProfileService, dashboardService } from '../../services/api';
-import {
-  WORLD_COUNTRIES,
-  getCountryNameFromCode,
-  getCountryFromCode,
-  getFlagEmoji,
-} from '../../utils/countryUtils';
+import { WORLD_COUNTRIES, getCountryNameFromCode } from '../../utils/countryUtils';
+
+// ─── Accent palette (matches the sidebar "My Profile" highlight) ───
+// To go back to the old purple look, set ACCENT = '#6869ff',
+// ACCENT_HOVER = '#5254eb' and ACCENT_RGB = '104, 105, 255'.
+const ACCENT = '#f97316';
+const ACCENT_HOVER = '#ea580c';
+const ACCENT_RGB = '249, 115, 22';
+
+// Banner: soft orange -> lavender -> blue blend (same family as the dashboard cards)
+const BANNER_GRADIENT_LIGHT =
+  'linear-gradient(120deg, #fff1e0 0%, #ffe4cc 28%, #f3e8ff 65%, #dbeafe 100%)';
+const BANNER_GRADIENT_DARK =
+  'linear-gradient(120deg, rgba(249,115,22,0.30) 0%, rgba(147,51,234,0.28) 60%, rgba(37,99,235,0.30) 100%)';
+
+// Dashboard-style stat card palette (orange / blue / green / purple)
+const STAT_THEMES = {
+  orange: {
+    bg: '#fff7ed', border: '#fed7aa', iconBg: '#ffedd5', icon: '#f97316',
+    dark: { bg: 'rgba(249,115,22,0.10)', border: 'rgba(249,115,22,0.25)', iconBg: 'rgba(249,115,22,0.18)' },
+  },
+  blue: {
+    bg: '#eff6ff', border: '#dbeafe', iconBg: '#dbeafe', icon: '#2563eb',
+    dark: { bg: 'rgba(37,99,235,0.10)', border: 'rgba(37,99,235,0.25)', iconBg: 'rgba(37,99,235,0.18)' },
+  },
+  green: {
+    bg: '#f0fdf4', border: '#dcfce7', iconBg: '#dcfce7', icon: '#16a34a',
+    dark: { bg: 'rgba(22,163,74,0.10)', border: 'rgba(22,163,74,0.25)', iconBg: 'rgba(22,163,74,0.18)' },
+  },
+  purple: {
+    bg: '#faf5ff', border: '#f3e8ff', iconBg: '#f3e8ff', icon: '#9333ea',
+    dark: { bg: 'rgba(147,51,234,0.10)', border: 'rgba(147,51,234,0.25)', iconBg: 'rgba(147,51,234,0.18)' },
+  },
+};
+
+const GENDER_OPTIONS = [
+  { value: 1, label: 'Male', Icon: MaleIcon, color: '#6869ff', rgb: '104, 105, 255' },
+  { value: 2, label: 'Female', Icon: FemaleIcon, color: '#ff73b9ff', rgb: '236, 72, 153' },
+  { value: 3, label: 'Others', Icon: TransgenderIcon, color: '#10b981', rgb: '16, 185, 129' },
+];
 
 export default function StudentProfile() {
-  const { user, updateUser } = useAuth();
+  const { updateUser } = useAuth();
   const colors = useThemeColors();
   const { isDark } = useAppTheme();
 
@@ -52,7 +84,6 @@ export default function StudentProfile() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [activeTab, setActiveTab] = useState('personal'); // 'personal' | 'learning' | 'security'
 
-  // Student telemetry stats for top badges
   const [stats, setStats] = useState({
     totalRegistrations: 0,
     completedWebinars: 0,
@@ -60,7 +91,6 @@ export default function StudentProfile() {
     totalAttendedMinutes: 0,
   });
 
-  // Profile Form State
   const [formData, setFormData] = useState({
     id: 0,
     firstName: '',
@@ -74,11 +104,9 @@ export default function StudentProfile() {
     roleName: 'Student',
   });
 
-  // Image preview state
   const [previewImage, setPreviewImage] = useState(null);
   const fileInputRef = useRef(null);
 
-  // Load profile data on mount
   useEffect(() => {
     fetchProfileData();
     fetchStatsData();
@@ -90,7 +118,6 @@ export default function StudentProfile() {
       const res = await studentProfileService.getProfile();
       if (res.data?.success && res.data?.data) {
         const p = res.data.data;
-        // Normalize country code
         let normalizedCode = p.countryCode || '+91';
         if (!normalizedCode.startsWith('+') && normalizedCode.length > 0) {
           normalizedCode = `+${normalizedCode}`;
@@ -105,7 +132,7 @@ export default function StudentProfile() {
           mobileNumber: p.mobileNumber || '',
           countryCode: normalizedCode,
           countryName: resolvedCountryName,
-          gender: p.gender === 2 ? 2 : p.gender === 3 ? 3 : 1, // Default to Male (1) if unset
+          gender: p.gender === 2 ? 2 : p.gender === 3 ? 3 : 1,
           profileUrl: p.profileUrl || '',
           roleName: p.roleName || 'Student',
         });
@@ -135,7 +162,6 @@ export default function StudentProfile() {
     }
   };
 
-  // Resolve absolute avatar URL
   const getFullAvatarUrl = (url) => {
     if (!url) return null;
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
@@ -144,7 +170,6 @@ export default function StudentProfile() {
     return `${apiBase}${cleanPath}`;
   };
 
-  // Handle image upload
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -159,12 +184,10 @@ export default function StudentProfile() {
       return;
     }
 
-    // Set immediate client preview
     const reader = new FileReader();
     reader.onload = () => setPreviewImage(reader.result);
     reader.readAsDataURL(file);
 
-    // Upload to backend
     setUploadingPhoto(true);
     const form = new FormData();
     form.append('file', file);
@@ -174,8 +197,6 @@ export default function StudentProfile() {
       if (res.data?.success && res.data?.profileUrl) {
         setFormData((prev) => ({ ...prev, profileUrl: res.data.profileUrl }));
         toast.success('Profile photo updated successfully!');
-
-        // Update local user context if present
         if (updateUser) {
           updateUser({ profileUrl: res.data.profileUrl });
         }
@@ -190,7 +211,6 @@ export default function StudentProfile() {
     }
   };
 
-  // Active selected country object from library dataset
   const selectedCountry =
     WORLD_COUNTRIES.find(
       (c) => c.name.toLowerCase() === (formData.countryName || '').toLowerCase()
@@ -200,7 +220,6 @@ export default function StudentProfile() {
     ) ||
     WORLD_COUNTRIES[0];
 
-  // Country selection using instant searchable Autocomplete (no UI lag, no accidental selection)
   const handleCountrySelect = (event, newCountry) => {
     if (newCountry) {
       setFormData((prev) => ({
@@ -211,7 +230,6 @@ export default function StudentProfile() {
     }
   };
 
-  // Handle form submission
   const handleSaveProfile = async (e) => {
     if (e) e.preventDefault();
 
@@ -249,7 +267,6 @@ export default function StudentProfile() {
             profileUrl: updated.profileUrl || prev.profileUrl,
           }));
 
-          // Sync with local user state
           if (updateUser) {
             updateUser({
               firstName: updated.firstName,
@@ -273,10 +290,27 @@ export default function StudentProfile() {
   const initials = `${formData.firstName?.[0] || 'S'}${formData.lastName?.[0] || 'T'}`.toUpperCase();
   const currentAvatarSrc = previewImage || getFullAvatarUrl(formData.profileUrl);
 
+  // Shared input styling
+  const inputSx = {
+    borderRadius: '12px',
+    bgcolor: isDark ? colors.surfaceAlt : '#ffffff',
+    fontSize: 14,
+    fontWeight: 550,
+    height: '42px',
+  };
+
+  const labelSx = { fontSize: 13, fontWeight: 650, color: colors.textPrimary, mb: 1 };
+
+  const tabs = [
+    { key: 'personal', label: 'Personal Details' },
+    { key: 'learning', label: 'Learning Profile', count: stats.totalRegistrations },
+    { key: 'security', label: 'Account & Credentials' },
+  ];
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: 2 }}>
-        <CircularProgress sx={{ color: '#6869ff' }} />
+        <CircularProgress sx={{ color: ACCENT }} />
         <Typography sx={{ color: colors.textSecondary, fontSize: 14, fontWeight: 550 }}>
           Loading student profile...
         </Typography>
@@ -286,10 +320,9 @@ export default function StudentProfile() {
 
   return (
     <Box sx={{ maxWidth: 1140, mx: 'auto', pb: 8 }}>
-      {/* ─────────────────────────────────────────────────────────────
-          1. TOP AURA BANNER & SILICONE-MORPHIC IDENTITY HEADER
-          Matches reference design with linear aurora + squircle profile
-      ────────────────────────────────────────────────────────────── */}
+      {/* ─────────────────────────────────────────────
+          1. COMPACT BANNER + IDENTITY HEADER
+      ───────────────────────────────────────────── */}
       <Paper
         elevation={0}
         sx={{
@@ -299,39 +332,32 @@ export default function StudentProfile() {
           bgcolor: colors.surface,
           boxShadow: isDark
             ? '0 20px 40px -15px rgba(0, 0, 0, 0.5)'
-            : '0 20px 48px -12px rgba(99, 102, 241, 0.08), 0 1px 3px rgba(0,0,0,0.02)',
+            : `0 20px 48px -12px rgba(${ACCENT_RGB}, 0.1), 0 1px 3px rgba(0,0,0,0.02)`,
           mb: 4,
           position: 'relative',
         }}
       >
-        {/* Aura Top Gradient Banner (Sourced from global theme.js) */}
+        {/* Banner (shorter, orange gradient) */}
         <Box
           sx={{
-            height: { xs: 150, sm: 190, md: 220 },
+            height: { xs: 96, sm: 110, md: 120 },
             width: '100%',
             position: 'relative',
-            background: colors.bannerBg,
+            background: isDark ? BANNER_GRADIENT_DARK : BANNER_GRADIENT_LIGHT,
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
-            p: { xs: 2.5, md: 3.5 },
+            p: { xs: 2, md: 2.5 },
           }}
         >
-          {/* Subtle star / sparkle accent in banner */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <AutoAwesomeIcon
-              sx={{
-                fontSize: 22,
-                color: colors.bannerSparkle,
-                opacity: 0.95,
-              }}
-            />
+            <AutoAwesomeIcon sx={{ fontSize: 22, color: ACCENT, opacity: 0.95 }} />
             <Typography
               sx={{
                 fontSize: 13,
                 fontWeight: 700,
                 letterSpacing: '0.4px',
-                color: colors.bannerBadgeText,
+                color: isDark ? '#fed7aa' : '#9a3412',
                 textTransform: 'uppercase',
               }}
             >
@@ -342,7 +368,10 @@ export default function StudentProfile() {
           <Button
             size="small"
             startIcon={<RefreshIcon sx={{ fontSize: 16 }} />}
-            onClick={() => { fetchProfileData(); fetchStatsData(); }}
+            onClick={() => {
+              fetchProfileData();
+              fetchStatsData();
+            }}
             sx={{
               bgcolor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.85)',
               backdropFilter: 'blur(10px)',
@@ -365,13 +394,13 @@ export default function StudentProfile() {
           </Button>
         </Box>
 
-        {/* Silicone Squircle Profile Section */}
+        {/* Profile section (overlaps banner less) */}
         <Box
           sx={{
             px: { xs: 2.5, sm: 4, md: 5 },
             pb: { xs: 3, md: 4 },
             pt: 0,
-            mt: { xs: -9, sm: -11, md: -13 },
+            mt: { xs: -6, sm: -7, md: -8 },
             position: 'relative',
             zIndex: 2,
           }}
@@ -385,7 +414,6 @@ export default function StudentProfile() {
               gap: 3,
             }}
           >
-            {/* Left: Squircle Avatar + Name & Details */}
             <Box
               sx={{
                 display: 'flex',
@@ -394,27 +422,24 @@ export default function StudentProfile() {
                 gap: { xs: 2.5, sm: 3.5 },
               }}
             >
-              {/* Silicone Morphism Squircle Avatar Container */}
+              {/* Avatar */}
               <Box sx={{ position: 'relative', flexShrink: 0 }}>
                 <Box
                   sx={{
-                    width: { xs: 128, sm: 154, md: 172 },
-                    height: { xs: 128, sm: 154, md: 172 },
-                    borderRadius: { xs: '32px', sm: '40px' },
+                    width: { xs: 112, sm: 128, md: 144 },
+                    height: { xs: 112, sm: 128, md: 144 },
+                    borderRadius: { xs: '28px', sm: '34px' },
                     overflow: 'hidden',
                     position: 'relative',
-                    // Silicone morphism: translucent outer borders with soft layered glows
                     bgcolor: isDark ? '#1e293b' : '#ffffff',
                     border: isDark
                       ? '6px solid rgba(30, 41, 59, 0.9)'
                       : '8px solid rgba(255, 255, 255, 0.95)',
                     boxShadow: isDark
                       ? '0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.15)'
-                      : '0 22px 50px -12px rgba(104, 105, 255, 0.28), 0 8px 24px -6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(220, 226, 245, 0.8)',
+                      : `0 22px 50px -12px rgba(${ACCENT_RGB}, 0.28), 0 8px 24px -6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(220, 226, 245, 0.8)`,
                     transition: 'all 0.3s ease',
-                    '&:hover .avatar-overlay': {
-                      opacity: 1,
-                    },
+                    '&:hover .avatar-overlay': { opacity: 1 },
                   }}
                 >
                   {currentAvatarSrc ? (
@@ -422,12 +447,7 @@ export default function StudentProfile() {
                       component="img"
                       src={currentAvatarSrc}
                       alt="Student Avatar"
-                      sx={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        display: 'block',
-                      }}
+                      sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                     />
                   ) : (
                     <Box
@@ -437,9 +457,9 @@ export default function StudentProfile() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        background: 'linear-gradient(135deg, #6869ff 0%, #4338ca 100%)',
+                        background: `linear-gradient(135deg, ${ACCENT} 0%, #c2410c 100%)`,
                         color: '#ffffff',
-                        fontSize: { xs: 40, sm: 50, md: 56 },
+                        fontSize: { xs: 34, sm: 42, md: 48 },
                         fontWeight: 750,
                         letterSpacing: '-0.5px',
                       }}
@@ -448,7 +468,6 @@ export default function StudentProfile() {
                     </Box>
                   )}
 
-                  {/* Silicone Morphic Hover Overlay for Photo Upload */}
                   <Box
                     className="avatar-overlay"
                     onClick={() => fileInputRef.current?.click()}
@@ -471,7 +490,7 @@ export default function StudentProfile() {
                       <CircularProgress size={28} sx={{ color: '#ffffff' }} />
                     ) : (
                       <>
-                        <CameraAltIcon sx={{ color: '#ffffff', fontSize: 28 }} />
+                        <CameraAltIcon sx={{ color: '#ffffff', fontSize: 26 }} />
                         <Typography sx={{ color: '#ffffff', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
                           Change Photo
                         </Typography>
@@ -480,34 +499,31 @@ export default function StudentProfile() {
                   </Box>
                 </Box>
 
-                {/* Silicone quick-action badge button on bottom right of avatar */}
                 <Tooltip title="Upload new photo" arrow>
-                  <IconButton
-                    size="small"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadingPhoto}
-                    sx={{
-                      position: 'absolute',
-                      bottom: 4,
-                      right: 4,
-                      width: 38,
-                      height: 38,
-                      borderRadius: '14px',
-                      bgcolor: '#6869ff',
-                      color: '#ffffff',
-                      boxShadow: '0 6px 18px rgba(104, 105, 255, 0.45)',
-                      border: '3px solid #ffffff',
-                      '&:hover': {
-                        bgcolor: '#5254eb',
-                        transform: 'scale(1.06)',
-                      },
-                    }}
-                  >
-                    <CameraAltIcon sx={{ fontSize: 17 }} />
-                  </IconButton>
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingPhoto}
+                      sx={{
+                        position: 'absolute',
+                        bottom: 4,
+                        right: 4,
+                        width: 36,
+                        height: 36,
+                        borderRadius: '13px',
+                        bgcolor: ACCENT,
+                        color: '#ffffff',
+                        boxShadow: `0 6px 18px rgba(${ACCENT_RGB}, 0.45)`,
+                        border: '3px solid #ffffff',
+                        '&:hover': { bgcolor: ACCENT_HOVER, transform: 'scale(1.06)' },
+                      }}
+                    >
+                      <CameraAltIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </span>
                 </Tooltip>
 
-                {/* Hidden File Input */}
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -517,7 +533,7 @@ export default function StudentProfile() {
                 />
               </Box>
 
-              {/* Identity & Badges (Matches Portfolia Reference Header) */}
+              {/* Identity */}
               <Box sx={{ pb: { xs: 0, sm: 0.5 } }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mb: 0.75 }}>
                   <Typography
@@ -532,13 +548,12 @@ export default function StudentProfile() {
                     {formData.firstName || 'Student'} {formData.lastName || ''}
                   </Typography>
 
-                  {/* PRO/STUDENT Capsule Pill (Reference style) */}
                   <Chip
                     icon={<AutoAwesomeIcon sx={{ fontSize: '13px !important', color: '#ffffff !important' }} />}
                     label="STUDENT"
                     size="small"
                     sx={{
-                      bgcolor: '#6869ff',
+                      bgcolor: ACCENT,
                       color: '#ffffff',
                       fontWeight: 750,
                       fontSize: '11px',
@@ -546,7 +561,7 @@ export default function StudentProfile() {
                       height: 25,
                       borderRadius: '8px',
                       px: 0.5,
-                      boxShadow: '0 4px 12px rgba(104, 105, 255, 0.35)',
+                      boxShadow: `0 4px 12px rgba(${ACCENT_RGB}, 0.35)`,
                     }}
                   />
 
@@ -574,6 +589,7 @@ export default function StudentProfile() {
                     mb: 2,
                     display: 'flex',
                     alignItems: 'center',
+                    flexWrap: 'wrap',
                     gap: 0.75,
                   }}
                 >
@@ -584,7 +600,6 @@ export default function StudentProfile() {
                   <span style={{ color: colors.textMuted }}>{formData.email}</span>
                 </Typography>
 
-                {/* Action Buttons (Follow / Get In Touch style from reference) */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                   <Button
                     variant="contained"
@@ -601,10 +616,7 @@ export default function StudentProfile() {
                       fontWeight: 650,
                       textTransform: 'none',
                       boxShadow: '0 6px 18px rgba(17, 24, 39, 0.2)',
-                      '&:hover': {
-                        bgcolor: '#1f2937',
-                        transform: 'translateY(-1px)',
-                      },
+                      '&:hover': { bgcolor: '#1f2937', transform: 'translateY(-1px)' },
                     }}
                   >
                     {saving ? 'Saving...' : 'Save Profile'}
@@ -626,9 +638,9 @@ export default function StudentProfile() {
                       textTransform: 'none',
                       bgcolor: isDark ? 'rgba(255, 255, 255, 0.03)' : '#ffffff',
                       '&:hover': {
-                        borderColor: '#6869ff',
-                        color: '#6869ff',
-                        bgcolor: isDark ? 'rgba(104, 105, 255, 0.08)' : 'rgba(104, 105, 255, 0.04)',
+                        borderColor: ACCENT,
+                        color: ACCENT,
+                        bgcolor: isDark ? `rgba(${ACCENT_RGB}, 0.1)` : `rgba(${ACCENT_RGB}, 0.05)`,
                       },
                     }}
                   >
@@ -637,254 +649,73 @@ export default function StudentProfile() {
                 </Box>
               </Box>
             </Box>
-
-            {/* Right: Counter Stats Badges (Followers / Following / Likes style from reference image) */}
-            {/* <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: { xs: 2.5, sm: 3.5 },
-                mt: { xs: 2, md: 0 },
-                pb: { xs: 0, sm: 1 },
-                alignSelf: { xs: 'stretch', md: 'flex-end' },
-                justifyContent: { xs: 'space-between', sm: 'flex-start', md: 'flex-end' },
-                borderTop: { xs: `1px solid ${colors.border}`, md: 'none' },
-                pt: { xs: 2, md: 0 },
-              }}
-            >
-              
-              <Box sx={{ textAlign: 'center' }}>
-                <Box
-                  sx={{
-                    width: 38,
-                    height: 38,
-                    mx: 'auto',
-                    mb: 0.75,
-                    borderRadius: '12px',
-                    bgcolor: 'rgba(249, 115, 22, 0.12)',
-                    color: '#f97316',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 750,
-                    fontSize: 14,
-                  }}
-                >
-                  <SchoolIcon sx={{ fontSize: 20 }} />
-                </Box>
-                <Typography sx={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-                  Enrolled
-                </Typography>
-                <Typography sx={{ fontSize: 22, fontWeight: 750, color: colors.textPrimary, lineHeight: 1.2 }}>
-                  {stats.totalRegistrations}
-                </Typography>
-              </Box>
-
-              
-              <Box sx={{ textAlign: 'center' }}>
-                <Box
-                  sx={{
-                    width: 38,
-                    height: 38,
-                    mx: 'auto',
-                    mb: 0.75,
-                    borderRadius: '12px',
-                    bgcolor: 'rgba(104, 105, 255, 0.12)',
-                    color: '#6869ff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 750,
-                    fontSize: 14,
-                  }}
-                >
-                  <HowToRegIcon sx={{ fontSize: 20 }} />
-                </Box>
-                <Typography sx={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-                  Completed
-                </Typography>
-                <Typography sx={{ fontSize: 22, fontWeight: 750, color: colors.textPrimary, lineHeight: 1.2 }}>
-                  {stats.completedWebinars}
-                </Typography>
-              </Box>
-
-              <Box sx={{ textAlign: 'center' }}>
-                <Box
-                  sx={{
-                    width: 38,
-                    height: 38,
-                    mx: 'auto',
-                    mb: 0.75,
-                    borderRadius: '12px',
-                    bgcolor: 'rgba(16, 185, 129, 0.12)',
-                    color: '#10b981',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 750,
-                    fontSize: 14,
-                  }}
-                >
-                  <EmojiEventsIcon sx={{ fontSize: 20 }} />
-                </Box>
-                <Typography sx={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-                  Certificates
-                </Typography>
-                <Typography sx={{ fontSize: 22, fontWeight: 750, color: colors.textPrimary, lineHeight: 1.2 }}>
-                  {stats.certificatesEarned}
-                </Typography>
-              </Box>
-
-             
-              <Box sx={{ textAlign: 'center' }}>
-                <Box
-                  sx={{
-                    width: 38,
-                    height: 38,
-                    mx: 'auto',
-                    mb: 0.75,
-                    borderRadius: '12px',
-                    bgcolor: 'rgba(245, 158, 11, 0.12)',
-                    color: '#f59e0b',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 750,
-                    fontSize: 14,
-                  }}
-                >
-                  <AccessTimeFilledIcon sx={{ fontSize: 20 }} />
-                </Box>
-                <Typography sx={{ fontSize: 11, color: colors.textMuted, fontWeight: 600, letterSpacing: '0.3px', textTransform: 'uppercase' }}>
-                  Attended
-                </Typography>
-                <Typography sx={{ fontSize: 22, fontWeight: 750, color: colors.textPrimary, lineHeight: 1.2 }}>
-                  {attendedHours}h
-                </Typography>
-              </Box>
-            </Box> */}
           </Box>
 
-          {/* Reference Image Style Navigation Tabs (Work, Moodboards, Likes, About) */}
           <Divider sx={{ my: 3, borderColor: colors.border }} />
 
+          {/* Tabs */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, overflowX: 'auto', pb: 0.5 }}>
-            <Box
-              onClick={() => setActiveTab('personal')}
-              sx={{
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: activeTab === 'personal' ? 750 : 550,
-                color: activeTab === 'personal' ? colors.textPrimary : colors.textMuted,
-                pb: 1.2,
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.75,
-                transition: 'all 0.2s ease',
-                '&:hover': { color: colors.textPrimary },
-              }}
-            >
-              Personal Details
-              {activeTab === 'personal' && (
+            {tabs.map((tab) => {
+              const active = activeTab === tab.key;
+              return (
                 <Box
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
                   sx={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: 3,
-                    bgcolor: '#6869ff',
-                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    fontWeight: active ? 750 : 550,
+                    color: active ? colors.textPrimary : colors.textMuted,
+                    pb: 1.2,
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.75,
+                    whiteSpace: 'nowrap',
+                    transition: 'all 0.2s ease',
+                    '&:hover': { color: colors.textPrimary },
                   }}
-                />
-              )}
-            </Box>
-
-            <Box
-              onClick={() => setActiveTab('learning')}
-              sx={{
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: activeTab === 'learning' ? 750 : 550,
-                color: activeTab === 'learning' ? colors.textPrimary : colors.textMuted,
-                pb: 1.2,
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.75,
-                transition: 'all 0.2s ease',
-                '&:hover': { color: colors.textPrimary },
-              }}
-            >
-              Learning Profile
-              <Box
-                component="span"
-                sx={{
-                  fontSize: 11,
-                  px: 0.75,
-                  py: 0.1,
-                  borderRadius: '10px',
-                  bgcolor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
-                  color: colors.textSecondary,
-                  fontWeight: 650,
-                }}
-              >
-                {stats.totalRegistrations}
-              </Box>
-              {activeTab === 'learning' && (
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: 3,
-                    bgcolor: '#6869ff',
-                    borderRadius: '4px',
-                  }}
-                />
-              )}
-            </Box>
-
-            <Box
-              onClick={() => setActiveTab('security')}
-              sx={{
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: activeTab === 'security' ? 750 : 550,
-                color: activeTab === 'security' ? colors.textPrimary : colors.textMuted,
-                pb: 1.2,
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.75,
-                transition: 'all 0.2s ease',
-                '&:hover': { color: colors.textPrimary },
-              }}
-            >
-              Account & Credentials
-              {activeTab === 'security' && (
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: 3,
-                    bgcolor: '#6869ff',
-                    borderRadius: '4px',
-                  }}
-                />
-              )}
-            </Box>
+                >
+                  {tab.label}
+                  {tab.count !== undefined && (
+                    <Box
+                      component="span"
+                      sx={{
+                        fontSize: 11,
+                        px: 0.75,
+                        py: 0.1,
+                        borderRadius: '10px',
+                        bgcolor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+                        color: colors.textSecondary,
+                        fontWeight: 650,
+                      }}
+                    >
+                      {tab.count}
+                    </Box>
+                  )}
+                  {active && (
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: 3,
+                        bgcolor: ACCENT,
+                        borderRadius: '4px',
+                      }}
+                    />
+                  )}
+                </Box>
+              );
+            })}
           </Box>
         </Box>
       </Paper>
 
-      {/* ─────────────────────────────────────────────────────────────
-          2. TAB CONTENTS: PERSONAL DETAILS FORM
-      ────────────────────────────────────────────────────────────── */}
+      {/* ─────────────────────────────────────────────
+          2. TAB: PERSONAL DETAILS
+      ───────────────────────────────────────────── */}
       {activeTab === 'personal' && (
         <Paper
           elevation={0}
@@ -910,7 +741,7 @@ export default function StudentProfile() {
           </Box>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, width: '100%' }}>
-            {/* Row 1: First Name, Last Name, and Email Address all in the SAME ROW */}
+            {/* Row 1 */}
             <Box
               sx={{
                 display: 'grid',
@@ -920,9 +751,8 @@ export default function StudentProfile() {
                 alignItems: 'flex-start',
               }}
             >
-              {/* 1. First Name */}
               <Box sx={{ width: '100%', minWidth: 0 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 650, color: colors.textPrimary, mb: 1 }}>
+                <Typography sx={labelSx}>
                   First Name <span style={{ color: '#ef4444' }}>*</span>
                 </Typography>
                 <TextField
@@ -932,42 +762,22 @@ export default function StudentProfile() {
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                   placeholder="Enter your first name"
                   required
-                  InputProps={{
-                    sx: {
-                      borderRadius: '12px',
-                      bgcolor: isDark ? colors.surfaceAlt : '#ffffff',
-                      fontSize: 14,
-                      fontWeight: 550,
-                      height: '42px',
-                    },
-                  }}
+                  InputProps={{ sx: inputSx }}
                 />
               </Box>
 
-              {/* 2. Last Name */}
               <Box sx={{ width: '100%', minWidth: 0 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 650, color: colors.textPrimary, mb: 1 }}>
-                  Last Name
-                </Typography>
+                <Typography sx={labelSx}>Last Name</Typography>
                 <TextField
                   fullWidth
                   size="small"
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                   placeholder="Enter your last name"
-                  InputProps={{
-                    sx: {
-                      borderRadius: '12px',
-                      bgcolor: isDark ? colors.surfaceAlt : '#ffffff',
-                      fontSize: 14,
-                      fontWeight: 550,
-                      height: '42px',
-                    },
-                  }}
+                  InputProps={{ sx: inputSx }}
                 />
               </Box>
 
-              {/* 3. Email Address */}
               <Box sx={{ width: '100%', minWidth: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                   <Typography sx={{ fontSize: 13, fontWeight: 650, color: colors.textPrimary }}>
@@ -992,23 +802,19 @@ export default function StudentProfile() {
                   value={formData.email}
                   disabled
                   InputProps={{
-                    startAdornment: (
-                      <LockOutlinedIcon sx={{ fontSize: 16, color: colors.textMuted, mr: 1 }} />
-                    ),
+                    startAdornment: <LockOutlinedIcon sx={{ fontSize: 16, color: colors.textMuted, mr: 1 }} />,
                     sx: {
-                      borderRadius: '12px',
+                      ...inputSx,
                       bgcolor: isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(243, 244, 246, 0.75)',
                       fontSize: 13.5,
-                      fontWeight: 550,
                       color: colors.textSecondary,
-                      height: '42px',
                     },
                   }}
                 />
               </Box>
             </Box>
 
-            {/* Row 2: Country, Phone Number, and Gender in the SAME ROW */}
+            {/* Row 2 */}
             <Box
               sx={{
                 display: 'grid',
@@ -1018,11 +824,9 @@ export default function StudentProfile() {
                 alignItems: 'flex-start',
               }}
             >
-              {/* 1. Country */}
+              {/* Country */}
               <Box sx={{ width: '100%', minWidth: 0 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 650, color: colors.textPrimary, mb: 1 }}>
-                  Country
-                </Typography>
+                <Typography sx={labelSx}>Country</Typography>
                 <Autocomplete
                   fullWidth
                   size="small"
@@ -1068,20 +872,11 @@ export default function StudentProfile() {
                         key={`${option.iso2}-${option.name}`}
                         component="li"
                         {...restProps}
-                        sx={{
-                          fontSize: 13.5,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1.25,
-                          py: 1,
-                          px: 1.5,
-                        }}
+                        sx={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 1.25, py: 1, px: 1.5 }}
                       >
                         <span style={{ fontSize: 20 }}>{option.flag}</span>
                         <span style={{ fontWeight: 550, color: colors.textPrimary, flex: 1 }}>{option.name}</span>
-                        <span style={{ color: colors.textMuted, fontSize: 12.5, fontWeight: 600 }}>
-                          {option.dialCode}
-                        </span>
+                        <span style={{ color: colors.textMuted, fontSize: 12.5, fontWeight: 600 }}>{option.dialCode}</span>
                       </Box>
                     );
                   }}
@@ -1097,25 +892,16 @@ export default function StudentProfile() {
                             <span style={{ fontSize: 18 }}>{selectedCountry?.flag || '🌐'}</span>
                           </InputAdornment>
                         ),
-                        sx: {
-                          borderRadius: '12px',
-                          bgcolor: isDark ? colors.surfaceAlt : '#ffffff',
-                          fontSize: 13.5,
-                          fontWeight: 550,
-                          width: '100%',
-                          height: '42px',
-                        },
+                        sx: { ...inputSx, fontSize: 13.5, width: '100%' },
                       }}
                     />
                   )}
                 />
               </Box>
 
-              {/* 2. Phone Number */}
+              {/* Phone */}
               <Box sx={{ width: '100%', minWidth: 0 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 650, color: colors.textPrimary, mb: 1 }}>
-                  Phone Number
-                </Typography>
+                <Typography sx={labelSx}>Phone Number</Typography>
                 <TextField
                   fullWidth
                   size="small"
@@ -1133,11 +919,11 @@ export default function StudentProfile() {
                             px: 1,
                             py: 0.25,
                             borderRadius: '8px',
-                            bgcolor: isDark ? 'rgba(104, 105, 255, 0.18)' : 'rgba(104, 105, 255, 0.08)',
-                            color: '#6869ff',
+                            bgcolor: isDark ? `rgba(${ACCENT_RGB}, 0.18)` : `rgba(${ACCENT_RGB}, 0.1)`,
+                            color: ACCENT,
                             fontWeight: 700,
                             fontSize: 12.5,
-                            border: `1px solid ${isDark ? 'rgba(104, 105, 255, 0.3)' : 'rgba(104, 105, 255, 0.2)'}`,
+                            border: `1px solid rgba(${ACCENT_RGB}, ${isDark ? 0.3 : 0.25})`,
                             userSelect: 'none',
                           }}
                         >
@@ -1146,118 +932,53 @@ export default function StudentProfile() {
                         </Box>
                       </InputAdornment>
                     ),
-                    sx: {
-                      borderRadius: '12px',
-                      bgcolor: isDark ? colors.surfaceAlt : '#ffffff',
-                      fontSize: 13.5,
-                      fontWeight: 550,
-                      height: '42px',
-                    },
+                    sx: { ...inputSx, fontSize: 13.5 },
                   }}
                 />
               </Box>
 
-              {/* 3. Gender */}
+              {/* Gender */}
               <Box sx={{ width: '100%', minWidth: 0 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 650, color: colors.textPrimary, mb: 1 }}>
-                  Gender
-                </Typography>
+                <Typography sx={labelSx}>Gender</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, height: '42px' }}>
-                  {/* Male Option */}
-                  <Box
-                    onClick={() => setFormData({ ...formData, gender: 1 })}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 0.5,
-                      height: '100%',
-                      px: 0.5,
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      fontSize: 12.5,
-                      fontWeight: 650,
-                      transition: 'all 0.2s ease',
-                      border: `1.5px solid ${formData.gender === 1 ? '#6869ff' : colors.border}`,
-                      bgcolor: formData.gender === 1
-                        ? isDark ? 'rgba(104, 105, 255, 0.18)' : 'rgba(104, 105, 255, 0.08)'
-                        : isDark ? colors.surfaceAlt : '#ffffff',
-                      color: formData.gender === 1 ? '#6869ff' : colors.textSecondary,
-                      boxShadow: formData.gender === 1 ? '0 4px 14px rgba(104, 105, 255, 0.2)' : 'none',
-                      '&:hover': {
-                        borderColor: '#6869ff',
-                      },
-                    }}
-                  >
-                    <MaleIcon sx={{ fontSize: 16 }} />
-                    Male
-                  </Box>
-
-                  {/* Female Option */}
-                  <Box
-                    onClick={() => setFormData({ ...formData, gender: 2 })}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 0.5,
-                      height: '100%',
-                      px: 0.5,
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      fontSize: 12.5,
-                      fontWeight: 650,
-                      transition: 'all 0.2s ease',
-                      border: `1.5px solid ${formData.gender === 2 ? '#ec4899' : colors.border}`,
-                      bgcolor: formData.gender === 2
-                        ? isDark ? 'rgba(236, 72, 153, 0.18)' : 'rgba(236, 72, 153, 0.08)'
-                        : isDark ? colors.surfaceAlt : '#ffffff',
-                      color: formData.gender === 2 ? '#ec4899' : colors.textSecondary,
-                      boxShadow: formData.gender === 2 ? '0 4px 14px rgba(236, 72, 153, 0.2)' : 'none',
-                      '&:hover': {
-                        borderColor: '#ec4899',
-                      },
-                    }}
-                  >
-                    <FemaleIcon sx={{ fontSize: 16 }} />
-                    Female
-                  </Box>
-
-                  {/* Others Option */}
-                  <Box
-                    onClick={() => setFormData({ ...formData, gender: 3 })}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 0.5,
-                      height: '100%',
-                      px: 0.5,
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      fontSize: 12.5,
-                      fontWeight: 650,
-                      transition: 'all 0.2s ease',
-                      border: `1.5px solid ${formData.gender === 3 ? '#10b981' : colors.border}`,
-                      bgcolor: formData.gender === 3
-                        ? isDark ? 'rgba(16, 185, 129, 0.18)' : 'rgba(16, 185, 129, 0.08)'
-                        : isDark ? colors.surfaceAlt : '#ffffff',
-                      color: formData.gender === 3 ? '#10b981' : colors.textSecondary,
-                      boxShadow: formData.gender === 3 ? '0 4px 14px rgba(16, 185, 129, 0.2)' : 'none',
-                      '&:hover': {
-                        borderColor: '#10b981',
-                      },
-                    }}
-                  >
-                    <TransgenderIcon sx={{ fontSize: 16 }} />
-                    Others
-                  </Box>
+                  {GENDER_OPTIONS.map(({ value, label, Icon, color, rgb }) => {
+                    const selected = formData.gender === value;
+                    return (
+                      <Box
+                        key={value}
+                        onClick={() => setFormData({ ...formData, gender: value })}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 0.5,
+                          height: '100%',
+                          px: 0.5,
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          fontSize: 12.5,
+                          fontWeight: 650,
+                          transition: 'all 0.2s ease',
+                          border: `1.5px solid ${selected ? color : colors.border}`,
+                          bgcolor: selected
+                            ? isDark ? `rgba(${rgb}, 0.18)` : `rgba(${rgb}, 0.08)`
+                            : isDark ? colors.surfaceAlt : '#ffffff',
+                          color: selected ? color : colors.textSecondary,
+                          boxShadow: selected ? `0 4px 14px rgba(${rgb}, 0.2)` : 'none',
+                          '&:hover': { borderColor: color },
+                        }}
+                      >
+                        <Icon sx={{ fontSize: 16 }} />
+                        {label}
+                      </Box>
+                    );
+                  })}
                 </Box>
               </Box>
             </Box>
           </Box>
 
-          {/* Form Actions Footer */}
+          {/* Footer actions */}
           <Box
             sx={{
               display: 'flex',
@@ -1291,7 +1012,7 @@ export default function StudentProfile() {
               disabled={saving}
               startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon sx={{ fontSize: 17 }} />}
               sx={{
-                bgcolor: '#6869ff',
+                bgcolor: ACCENT,
                 color: '#ffffff',
                 borderRadius: '12px',
                 px: 4,
@@ -1299,11 +1020,8 @@ export default function StudentProfile() {
                 fontSize: 13.5,
                 fontWeight: 700,
                 textTransform: 'none',
-                boxShadow: '0 8px 24px -4px rgba(104, 105, 255, 0.45)',
-                '&:hover': {
-                  bgcolor: '#5254eb',
-                  transform: 'translateY(-1px)',
-                },
+                boxShadow: `0 8px 24px -4px rgba(${ACCENT_RGB}, 0.45)`,
+                '&:hover': { bgcolor: ACCENT_HOVER, transform: 'translateY(-1px)' },
               }}
             >
               {saving ? 'Updating...' : 'Save Profile Changes'}
@@ -1312,9 +1030,9 @@ export default function StudentProfile() {
         </Paper>
       )}
 
-      {/* ─────────────────────────────────────────────────────────────
-          3. TAB 2: LEARNING JOURNEY QUICK VIEW
-      ────────────────────────────────────────────────────────────── */}
+      {/* ─────────────────────────────────────────────
+          3. TAB: LEARNING PROFILE
+      ───────────────────────────────────────────── */}
       {activeTab === 'learning' && (
         <Paper
           elevation={0}
@@ -1335,96 +1053,64 @@ export default function StudentProfile() {
           </Box>
 
           <Grid container spacing={2.5}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
-                sx={{
-                  p: 2.5,
-                  borderRadius: '16px',
-                  bgcolor: isDark ? colors.surfaceAlt : '#f8faff',
-                  border: `1px solid ${colors.border}`,
-                }}
-              >
-                <Typography sx={{ fontSize: 12, fontWeight: 650, color: colors.textMuted }}>
-                  Total Registrations
-                </Typography>
-                <Typography sx={{ fontSize: 26, fontWeight: 750, color: colors.textPrimary, mt: 0.5 }}>
-                  {stats.totalRegistrations}
-                </Typography>
-                <Typography sx={{ fontSize: 11.5, color: colors.textSecondary, mt: 0.25 }}>
-                  Webinars enrolled
-                </Typography>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
-                sx={{
-                  p: 2.5,
-                  borderRadius: '16px',
-                  bgcolor: isDark ? colors.surfaceAlt : '#f8faff',
-                  border: `1px solid ${colors.border}`,
-                }}
-              >
-                <Typography sx={{ fontSize: 12, fontWeight: 650, color: colors.textMuted }}>
-                  Completed Webinars
-                </Typography>
-                <Typography sx={{ fontSize: 26, fontWeight: 750, color: '#10b981', mt: 0.5 }}>
-                  {stats.completedWebinars}
-                </Typography>
-                <Typography sx={{ fontSize: 11.5, color: colors.textSecondary, mt: 0.25 }}>
-                  Successfully finished
-                </Typography>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
-                sx={{
-                  p: 2.5,
-                  borderRadius: '16px',
-                  bgcolor: isDark ? colors.surfaceAlt : '#f8faff',
-                  border: `1px solid ${colors.border}`,
-                }}
-              >
-                <Typography sx={{ fontSize: 12, fontWeight: 650, color: colors.textMuted }}>
-                  Certificates Earned
-                </Typography>
-                <Typography sx={{ fontSize: 26, fontWeight: 750, color: '#6869ff', mt: 0.5 }}>
-                  {stats.certificatesEarned}
-                </Typography>
-                <Typography sx={{ fontSize: 11.5, color: colors.textSecondary, mt: 0.25 }}>
-                  Verified credentials
-                </Typography>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Box
-                sx={{
-                  p: 2.5,
-                  borderRadius: '16px',
-                  bgcolor: isDark ? colors.surfaceAlt : '#f8faff',
-                  border: `1px solid ${colors.border}`,
-                }}
-              >
-                <Typography sx={{ fontSize: 12, fontWeight: 650, color: colors.textMuted }}>
-                  Learning Duration
-                </Typography>
-                <Typography sx={{ fontSize: 26, fontWeight: 750, color: '#f59e0b', mt: 0.5 }}>
-                  {attendedHours} hrs
-                </Typography>
-                <Typography sx={{ fontSize: 11.5, color: colors.textSecondary, mt: 0.25 }}>
-                  Total live time
-                </Typography>
-              </Box>
-            </Grid>
+            {[
+              { title: 'Total Registrations', value: stats.totalRegistrations, caption: 'Webinars enrolled', theme: 'orange', Icon: EventNoteOutlinedIcon },
+              { title: 'Completed Webinars', value: stats.completedWebinars, caption: 'Successfully finished', theme: 'green', Icon: TaskAltIcon },
+              { title: 'Certificates Earned', value: stats.certificatesEarned, caption: 'Verified credentials', theme: 'purple', Icon: WorkspacePremiumIcon },
+              { title: 'Learning Duration', value: `${attendedHours} hrs`, caption: 'Total live time', theme: 'blue', Icon: AccessTimeIcon },
+            ].map(({ title, value, caption, theme, Icon }) => {
+              const t = STAT_THEMES[theme];
+              const d = isDark ? t.dark : t;
+              return (
+                <Grid item xs={12} sm={6} md={3} key={title}>
+                  <Box
+                    sx={{
+                      p: 2.5,
+                      borderRadius: '16px',
+                      bgcolor: d.bg,
+                      border: `1px solid ${d.border}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: '14px',
+                        bgcolor: d.iconBg,
+                        color: t.icon,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Icon sx={{ fontSize: 24 }} />
+                    </Box>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontSize: 12, fontWeight: 650, color: colors.textSecondary }}>
+                        {title}
+                      </Typography>
+                      <Typography sx={{ fontSize: 26, fontWeight: 750, color: colors.textPrimary, lineHeight: 1.2 }}>
+                        {value}
+                      </Typography>
+                      <Typography sx={{ fontSize: 11.5, color: colors.textMuted }}>
+                        {caption}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+              );
+            })}
           </Grid>
         </Paper>
       )}
 
-      {/* ─────────────────────────────────────────────────────────────
-          4. TAB 3: ACCOUNT & CREDENTIALS
-      ────────────────────────────────────────────────────────────── */}
+      {/* ─────────────────────────────────────────────
+          4. TAB: ACCOUNT & CREDENTIALS
+      ───────────────────────────────────────────── */}
       {activeTab === 'security' && (
         <Paper
           elevation={0}
@@ -1453,15 +1139,14 @@ export default function StudentProfile() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                gap: 2,
               }}
             >
               <Box>
                 <Typography sx={{ fontSize: 14, fontWeight: 650, color: colors.textPrimary }}>
                   Primary Email Anchor
                 </Typography>
-                <Typography sx={{ fontSize: 12.5, color: colors.textSecondary }}>
-                  {formData.email}
-                </Typography>
+                <Typography sx={{ fontSize: 12.5, color: colors.textSecondary }}>{formData.email}</Typography>
               </Box>
               <Chip label="Verified" size="small" color="success" sx={{ fontWeight: 650, borderRadius: '8px' }} />
             </Box>
@@ -1474,6 +1159,7 @@ export default function StudentProfile() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                gap: 2,
               }}
             >
               <Box>
@@ -1484,7 +1170,7 @@ export default function StudentProfile() {
                   Student (Role Level 3) — Access to webinars, certificates, live meeting rooms, and attendance analytics.
                 </Typography>
               </Box>
-              <Chip label="Student" size="small" sx={{ bgcolor: '#6869ff', color: '#fff', fontWeight: 650, borderRadius: '8px' }} />
+              <Chip label="Student" size="small" sx={{ bgcolor: ACCENT, color: '#fff', fontWeight: 650, borderRadius: '8px' }} />
             </Box>
           </Box>
         </Paper>

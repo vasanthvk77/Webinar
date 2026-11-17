@@ -9,7 +9,9 @@ public record CertificateRequest(
     string? ParticipantName = null,
     string? WebinarName = null,
     DateTime? CompletionDate = null,
-    string? CertificateId = null
+    string? CertificateId = null,
+    string? Year = null,
+    string? Department = null
 );
 
 public class StoredLogoSlot
@@ -22,11 +24,14 @@ public class StoredLogoSlot
     public string? ImageUrl { get; set; }
     public string? Type { get; set; } // "slot" or "text"
     public string? Text { get; set; }
+    public string? TextHtml { get; set; }
     public string? Color { get; set; }
     public bool Bold { get; set; }
     public float? FontSize { get; set; }
+    public float? LineHeight { get; set; }
     public string? Align { get; set; }
     public string? GroupId { get; set; }
+    public string? FontFamily { get; set; }  // e.g. "Arial", "Lato" — must be registered via FontManager
 }
 
 public class StoredLogoConfig
@@ -35,6 +40,7 @@ public class StoredLogoConfig
     public float TemplateHeight { get; set; } = 850f;
     public string? BackgroundUrl { get; set; }
     public List<StoredLogoSlot> LogoSlots { get; set; } = new();
+    public Dictionary<string, string>? Keywords { get; set; }
 }
 
 public class CertificateFileTemplateDto
@@ -353,19 +359,33 @@ public class CertificateService
 
     public byte[]? GenerateCertificatePdf(string templateId, CertificateRequest? data = null)
     {
+        _logger?.LogInformation("[FLOW-4a] GenerateCertificatePdf called — templateId={TemplateId}", templateId);
+
         // 1. Check if templateId is an integer ID referencing a visual CertificateTemplate in DB
         if (int.TryParse(templateId, out int dbId) && _templateService != null)
         {
+            _logger?.LogInformation("[FLOW-4b] templateId is numeric ({DbId}), fetching from DB via _templateService", dbId);
             var dbTemplate = _templateService.GetByIdAsync(dbId).GetAwaiter().GetResult();
             if (dbTemplate != null)
             {
+                _logger?.LogInformation("[FLOW-4c] DB template found — Id={Id}, Name={Name}, HasLogoConfig={HasConfig}", 
+                    dbTemplate.Id, dbTemplate.CertificateName, !string.IsNullOrWhiteSpace(dbTemplate.LogoConfiguration));
                 return GenerateVisualTemplatePdf(dbTemplate, data);
             }
+            _logger?.LogWarning("[FLOW-4b] DB template NOT found for dbId={DbId}, falling through to file-based path", dbId);
+        }
+        else
+        {
+            _logger?.LogInformation("[FLOW-4b] templateId is NOT numeric or _templateService is null — using file path: {TemplateId}", templateId);
         }
 
         var templatePath = GetTemplatePath(templateId);
+        _logger?.LogInformation("[FLOW-4d] File template path resolved: {Path}, exists={Exists}", templatePath, templatePath != null && File.Exists(templatePath));
         if (templatePath == null || !File.Exists(templatePath))
+        {
+            _logger?.LogError("[FLOW-4d] File template NOT found — returning null");
             return null;
+        }
 
         // FIX: page shape follows the template image (no blank strip at the bottom,
         // bottom-right artwork is no longer cut off).
@@ -499,6 +519,8 @@ public class CertificateService
     {
         try
         {
+            _logger?.LogInformation("[FLOW-4e] GenerateVisualTemplatePdf START — TemplateId={Id}", dbTemplate.Id);
+
             StoredLogoConfig? logoConfig = null;
             if (!string.IsNullOrWhiteSpace(dbTemplate.LogoConfiguration))
             {
@@ -508,11 +530,17 @@ public class CertificateService
                         dbTemplate.LogoConfiguration,
                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
                     );
+                    _logger?.LogInformation("[FLOW-4e] LogoConfig deserialized — Slots={Count}, Width={W}, Height={H}",
+                        logoConfig?.LogoSlots?.Count ?? 0, logoConfig?.TemplateWidth, logoConfig?.TemplateHeight);
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogWarning(ex, "[CertificateService] Failed to deserialize LogoConfiguration for Template {Id}", dbTemplate.Id);
+                    _logger?.LogWarning(ex, "[FLOW-4e] Failed to deserialize LogoConfiguration for Template {Id}", dbTemplate.Id);
                 }
+            }
+            else
+            {
+                _logger?.LogWarning("[FLOW-4e] LogoConfiguration is empty/null for TemplateId={Id}", dbTemplate.Id);
             }
 
             float designWidth = logoConfig?.TemplateWidth > 0 ? logoConfig.TemplateWidth : 1200f;
@@ -572,8 +600,11 @@ public class CertificateService
                         // 2. Render all configured logo slots and text elements at exact scaled canvas coordinates
                         if (logoConfig?.LogoSlots != null)
                         {
+                            _logger?.LogInformation("[FLOW-4e] Processing {Count} slots", logoConfig.LogoSlots.Count);
                             foreach (var slot in logoConfig.LogoSlots)
                             {
+                                _logger?.LogInformation("[FLOW-slot] Slot Type={Type}, Text={Text}, Align={Align}, X={X}, Y={Y}, W={W}, H={H}, FontSize={FS}, Bold={Bold}",
+                                    slot.Type, slot.Text?.Substring(0, Math.Min(30, slot.Text?.Length ?? 0)), slot.Align, slot.X, slot.Y, slot.Width, slot.Height, slot.FontSize, slot.Bold);
                                 float pdfX = slot.X * scale;
                                 float pdfY = slot.Y * scale;
                                 float pdfW = slot.Width * scale;
@@ -585,30 +616,156 @@ public class CertificateService
                                 if (string.Equals(slot.Type, "text", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(slot.Text))
                                 {
                                     var textContent = slot.Text ?? string.Empty;
+                                    var htmlContent = slot.TextHtml;
+
+                                    // Dynamically substitute template keywords / placeholders if data supplied
+                                    if (data != null)
+                                    {
+                                        var participant = !string.IsNullOrWhiteSpace(data.ParticipantName) ? data.ParticipantName.Trim() : "";
+                                        var webinar = !string.IsNullOrWhiteSpace(data.WebinarName) ? data.WebinarName.Trim() : "";
+                                        var year = !string.IsNullOrWhiteSpace(data.Year) ? data.Year.Trim() : "";
+                                        var dept = !string.IsNullOrWhiteSpace(data.Department) ? data.Department.Trim() : "";
+                                        var certCode = !string.IsNullOrWhiteSpace(data.CertificateId) ? data.CertificateId.Trim() : "";
+                                        var dateStr = (data.CompletionDate ?? DateTime.UtcNow).ToString("dd MMMM, yyyy");
+
+                                        string ReplaceTokens(string src)
+                                        {
+                                            if (string.IsNullOrEmpty(src)) return src;
+
+                                            // 1. Built-in default keywords
+                                            var res = src
+                                                .Replace("{WebinarName}", webinar, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{Year}", year, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{Department}", dept, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{StudentName}", participant, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{ParticipantName}", participant, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{CertificateId}", certCode, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{CertificateCode}", certCode, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{CertificateNo}", certCode, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{Date}", dateStr, StringComparison.OrdinalIgnoreCase)
+                                                .Replace("{CompletionDate}", dateStr, StringComparison.OrdinalIgnoreCase);
+
+                                            // 2. Custom mapped keywords from LogoConfiguration.keywords
+                                            if (logoConfig?.Keywords != null)
+                                            {
+                                                foreach (var (customKey, targetCol) in logoConfig.Keywords)
+                                                {
+                                                    if (string.IsNullOrWhiteSpace(customKey) || string.IsNullOrWhiteSpace(targetCol)) continue;
+                                                    string tag = customKey.StartsWith("{") ? customKey : $"{{{customKey}}}";
+                                                    string val = "";
+                                                    if (targetCol.Contains("WebinarName", StringComparison.OrdinalIgnoreCase)) val = webinar;
+                                                    else if (targetCol.Contains("Year", StringComparison.OrdinalIgnoreCase)) val = year;
+                                                    else if (targetCol.Contains("Department", StringComparison.OrdinalIgnoreCase)) val = dept;
+                                                    else if (targetCol.Contains("FullName", StringComparison.OrdinalIgnoreCase) || targetCol.Contains("FirstName", StringComparison.OrdinalIgnoreCase)) val = participant;
+                                                    else if (targetCol.Contains("Certificate", StringComparison.OrdinalIgnoreCase)) val = certCode;
+                                                    else if (targetCol.Contains("Date", StringComparison.OrdinalIgnoreCase)) val = dateStr;
+
+                                                    res = res.Replace(tag, val, StringComparison.OrdinalIgnoreCase);
+                                                }
+                                            }
+
+                                            return res;
+                                        }
+
+                                        textContent = ReplaceTokens(textContent);
+                                        if (!string.IsNullOrEmpty(htmlContent))
+                                        {
+                                            htmlContent = ReplaceTokens(htmlContent);
+                                        }
+                                    }
+
+                                    if (string.IsNullOrEmpty(htmlContent) && !string.IsNullOrEmpty(textContent) && textContent.Contains('<') && textContent.Contains('>'))
+                                    {
+                                        htmlContent = textContent;
+                                    }
+
                                     var textColor = !string.IsNullOrWhiteSpace(slot.Color) ? slot.Color : "#1E293B";
                                     var isBold = slot.Bold;
                                     float fontSizePt = (slot.FontSize.HasValue && slot.FontSize.Value > 0)
                                         ? Math.Max(6f, slot.FontSize.Value * scale)
                                         : Math.Max(6f, Math.Min(safeH * 0.7f, 32f));
 
-                                    layers.Layer()
-                                        .AlignTop()
-                                        .AlignLeft()
-                                        .PaddingLeft(pdfX)
-                                        .PaddingTop(pdfY)
-                                        .Width(safeW)
-                                        .Text(t =>
-                                        {
-                                            if (string.Equals(slot.Align, "left", StringComparison.OrdinalIgnoreCase))
-                                                t.AlignLeft();
-                                            else if (string.Equals(slot.Align, "right", StringComparison.OrdinalIgnoreCase))
-                                                t.AlignRight();
-                                            else
-                                                t.AlignCenter();
+                                    float lineH = slot.LineHeight.HasValue && slot.LineHeight.Value > 0
+                                        ? slot.LineHeight.Value
+                                        : 1.4f;
 
-                                            var span = t.Span(textContent).FontSize(fontSizePt).FontColor(textColor);
-                                            if (isBold) span.Bold();
-                                        });
+                                    // Build text container: alignment MUST come before Width/Height in QuestPDF
+                                    string alignStr = slot.Align ?? "center";
+                                    IContainer textContainer;
+                                    if (string.Equals(alignStr, "left", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        textContainer = layers.Layer()
+                                            .AlignTop().AlignLeft()
+                                            .PaddingLeft(pdfX).PaddingTop(pdfY)
+                                            .Width(safeW).MinHeight(safeH)
+                                            .PaddingHorizontal(12f * scale)
+                                            .AlignLeft().AlignMiddle();
+                                    }
+                                    else if (string.Equals(alignStr, "right", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        textContainer = layers.Layer()
+                                            .AlignTop().AlignLeft()
+                                            .PaddingLeft(pdfX).PaddingTop(pdfY)
+                                            .Width(safeW).MinHeight(safeH)
+                                            .PaddingHorizontal(12f * scale)
+                                            .AlignRight().AlignMiddle();
+                                    }
+                                    else
+                                    {
+                                        textContainer = layers.Layer()
+                                            .AlignTop().AlignLeft()
+                                            .PaddingLeft(pdfX).PaddingTop(pdfY)
+                                            .Width(safeW).MinHeight(safeH)
+                                            .PaddingHorizontal(12f * scale)
+                                            .AlignCenter().AlignMiddle();
+                                    }
+
+                                    textContainer.Text(t =>
+                                    {
+                                        // NormalizeFontFamily strips CSS stacks like '"Inter","Roboto",Arial,sans-serif'
+                                        // down to the first registered font name. Never passes raw CSS to QuestPDF.
+                                        var resolvedFont = NormalizeFontFamily(slot.FontFamily);
+                                        t.DefaultTextStyle(x => x.FontFamily(resolvedFont).LineHeight(lineH));
+
+                                        if (string.Equals(slot.Align, "left", StringComparison.OrdinalIgnoreCase))
+                                            t.AlignLeft();
+                                        else if (string.Equals(slot.Align, "right", StringComparison.OrdinalIgnoreCase))
+                                            t.AlignRight();
+                                        else
+                                            t.AlignCenter();
+
+                                        var richSpans = ParseRichText(htmlContent, textColor, isBold, fontSizePt, scale);
+                                        if (richSpans.Count > 0)
+                                        {
+                                            foreach (var s in richSpans)
+                                            {
+                                                if (string.IsNullOrEmpty(s.Text)) continue;
+                                                var safeColor = NormalizeColor(s.Color, textColor);
+                                                float safeFontSize = Math.Max(6f, s.FontSize ?? fontSizePt);
+                                                var span = t.Span(s.Text)
+                                                    .FontSize(safeFontSize)
+                                                    .FontColor(safeColor);
+
+                                                if (s.IsBold)
+                                                    span.Bold();
+                                                else
+                                                    span.NormalWeight();
+                                            }
+                                        }
+                                        else if (!string.IsNullOrEmpty(textContent))
+                                        {
+                                            var safeColor = NormalizeColor(textColor, "#1E293B");
+                                            float safeFontSize = Math.Max(6f, fontSizePt);
+                                            var span = t.Span(textContent)
+                                                .FontSize(safeFontSize)
+                                                .FontColor(safeColor);
+
+                                            if (isBold)
+                                                span.Bold();
+                                            else
+                                                span.NormalWeight();
+                                        }
+                                    });
                                 }
                                 else if (!string.IsNullOrWhiteSpace(slot.ImageUrl))
                                 {
@@ -641,9 +798,15 @@ public class CertificateService
                             }
                         }
 
-                        // 3. Dynamic participant text overlay if request data supplied
-                        if (data != null && (!string.IsNullOrWhiteSpace(data.ParticipantName) || !string.IsNullOrWhiteSpace(data.WebinarName)))
+                        bool hasCustomTextSlots = logoConfig?.LogoSlots != null &&
+                            logoConfig.LogoSlots.Any(s => string.Equals(s.Type, "text", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(s.Text));
+
+                        // 3. Dynamic participant text overlay
+                        // For visual designer templates: layout is 100% controlled by designer slots (e.g. {CertificateId}, {StudentName}, etc.).
+                        // Only pure legacy templates (without custom text slots) fall back to the fixed legacy overlay block.
+                        if (!hasCustomTextSlots && data != null && (!string.IsNullOrWhiteSpace(data.ParticipantName) || !string.IsNullOrWhiteSpace(data.WebinarName)))
                         {
+                            // Legacy fixed layout overlay ONLY for legacy pre-builder templates
                             var participantName = !string.IsNullOrWhiteSpace(data.ParticipantName)
                                 ? data.ParticipantName.Trim()
                                 : "PARTICIPANT NAME";
@@ -746,12 +909,255 @@ public class CertificateService
                 });
             });
 
+            _logger?.LogInformation("[FLOW-4f] Calling document.GeneratePdf() for TemplateId={Id}", dbTemplate.Id);
             return document.GeneratePdf();
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "[CertificateService] GenerateVisualTemplatePdf EXCEPTION for Template {Id}: {Message}", dbTemplate.Id, ex.Message);
+            _logger?.LogError(ex, "[FLOW-4g] GenerateVisualTemplatePdf CRASHED for TemplateId={Id} — {Message}", dbTemplate.Id, ex.Message);
             return null;
         }
+    }
+
+    private class RichTextSpan
+    {
+        public string Text { get; set; } = string.Empty;
+        public string Color { get; set; } = "#1E293B";
+        public bool IsBold { get; set; }
+        public float? FontSize { get; set; }
+    }
+
+    private static List<RichTextSpan> ParseRichText(string? html, string defaultColor, bool defaultBold, float defaultFontSize, float scale)
+    {
+        var result = new List<RichTextSpan>();
+        if (string.IsNullOrWhiteSpace(html))
+            return result;
+
+        if (!html.Contains('<') || !html.Contains('>'))
+        {
+            result.Add(new RichTextSpan
+            {
+                Text = System.Net.WebUtility.HtmlDecode(html),
+                Color = defaultColor,
+                IsBold = defaultBold,
+                FontSize = defaultFontSize
+            });
+            return result;
+        }
+
+        var tokens = System.Text.RegularExpressions.Regex.Split(html, @"(<[^>]+>)");
+
+        var colorStack = new Stack<string>();
+        var boldStack = new Stack<bool>();
+        var fontStack = new Stack<float?>();
+
+        colorStack.Push(defaultColor);
+        boldStack.Push(defaultBold);
+        fontStack.Push(defaultFontSize);
+
+        foreach (var token in tokens)
+        {
+            if (string.IsNullOrEmpty(token)) continue;
+
+            if (token.StartsWith("<") && token.EndsWith(">"))
+            {
+                var tag = token.Trim().ToLowerInvariant();
+
+                if (tag.StartsWith("</"))
+                {
+                    if (tag.StartsWith("</b") || tag.StartsWith("</strong") || tag.StartsWith("</span") || tag.StartsWith("</font") || tag.StartsWith("</em") || tag.StartsWith("</i"))
+                    {
+                        if (colorStack.Count > 1) colorStack.Pop();
+                        if (boldStack.Count > 1) boldStack.Pop();
+                        if (fontStack.Count > 1) fontStack.Pop();
+                    }
+                }
+                else if (tag.StartsWith("<br") || tag == "<p>" || tag.StartsWith("<div"))
+                {
+                    if (result.Count > 0 && !result[^1].Text.EndsWith("\n"))
+                    {
+                        result.Add(new RichTextSpan
+                        {
+                            Text = "\n",
+                            Color = colorStack.Peek(),
+                            IsBold = boldStack.Peek(),
+                            FontSize = fontStack.Peek()
+                        });
+                    }
+                }
+                else
+                {
+                    bool isB = boldStack.Peek();
+                    string col = colorStack.Peek();
+                    float? fSize = fontStack.Peek();
+
+                    if (tag.StartsWith("<b") || tag.StartsWith("<strong"))
+                    {
+                        isB = true;
+                    }
+
+                    var styleMatch = System.Text.RegularExpressions.Regex.Match(token, @"style\s*=\s*[""']([^""']+)[""']", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (styleMatch.Success)
+                    {
+                        var styleStr = styleMatch.Groups[1].Value;
+
+                        if (System.Text.RegularExpressions.Regex.IsMatch(styleStr, @"font-weight\s*:\s*(bold|700|800|900)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        {
+                            isB = true;
+                        }
+                        else if (System.Text.RegularExpressions.Regex.IsMatch(styleStr, @"font-weight\s*:\s*(normal|400|500)", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                        {
+                            isB = false;
+                        }
+
+                        var colMatch = System.Text.RegularExpressions.Regex.Match(styleStr, @"color\s*:\s*([^;""']+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (colMatch.Success)
+                        {
+                            col = NormalizeColor(colMatch.Groups[1].Value.Trim(), col);
+                        }
+
+                        var sizeMatch = System.Text.RegularExpressions.Regex.Match(styleStr, @"font-size\s*:\s*(\d+(\.\d+)?)px", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (sizeMatch.Success && float.TryParse(sizeMatch.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var parsedSize))
+                        {
+                            fSize = Math.Max(6f, parsedSize * scale);
+                        }
+                    }
+
+                    var fontColMatch = System.Text.RegularExpressions.Regex.Match(token, @"color\s*=\s*[""']([^""']+)[""']", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (fontColMatch.Success)
+                    {
+                        col = NormalizeColor(fontColMatch.Groups[1].Value.Trim(), col);
+                    }
+
+                    boldStack.Push(isB);
+                    colorStack.Push(col);
+                    fontStack.Push(fSize);
+                }
+            }
+            else
+            {
+                var text = System.Net.WebUtility.HtmlDecode(token);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    text = text.Replace('\u00A0', ' ');
+                    result.Add(new RichTextSpan
+                    {
+                        Text = text,
+                        Color = colorStack.Peek(),
+                        IsBold = boldStack.Peek(),
+                        FontSize = fontStack.Peek()
+                    });
+                }
+            }
+        }
+
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // NormalizeFontFamily — strips CSS font stacks, returns one registered name
+    // -----------------------------------------------------------------------
+    private static readonly HashSet<string> _cssFontGenericKeywords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sans-serif", "serif", "monospace", "cursive", "fantasy", "system-ui",
+        "ui-sans-serif", "ui-serif", "ui-monospace", "inherit", "initial", "unset"
+    };
+
+    // Map CSS / Google Font names → registered QuestPDF font family name.
+    // Add entries here when new font TTF files are added to backend/Fonts/.
+    private static readonly Dictionary<string, string> _fontAliasMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "inter",         "Arial" },
+        { "roboto",        "Arial" },
+        { "open sans",     "Arial" },
+        { "noto sans",     "Arial" },
+        { "helvetica",     "Arial" },
+        { "helvetica neue","Arial" },
+        { "verdana",       "Arial" },
+        { "calibri",       "Arial" },
+        { "tahoma",        "Arial" },
+        { "trebuchet ms",  "Arial" },
+        { "arial",         "Arial" },
+        { "lato",          "Lato"  },
+    };
+
+    // Font families registered via FontManager at startup (Program.cs).
+    // Keep in sync with the Fonts/ directory contents.
+    private static readonly HashSet<string> _registeredFonts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Arial", "Lato"
+    };
+
+    /// <summary>
+    /// Normalizes a raw CSS font-family value (possibly a stack like
+    /// <c>"Inter", "Roboto", Arial, sans-serif</c>) to a single font-family
+    /// name that is registered with QuestPDF's FontManager.
+    /// Never returns a CSS generic keyword or multi-token value.
+    /// Falls back to <paramref name="fallback"/> (default: "Arial").
+    /// </summary>
+    private static string NormalizeFontFamily(string? rawCssFont, string fallback = "Arial")
+    {
+        if (string.IsNullOrWhiteSpace(rawCssFont))
+            return fallback;
+
+        foreach (var candidate in rawCssFont.Split(','))
+        {
+            var name = candidate.Trim().Trim('"', '\'').Trim();
+            if (string.IsNullOrEmpty(name) || _cssFontGenericKeywords.Contains(name))
+                continue;
+
+            if (_registeredFonts.Contains(name))
+                return name;
+
+            if (_fontAliasMap.TryGetValue(name, out var mapped))
+                return mapped;
+        }
+
+        return fallback;
+    }
+
+    private static string NormalizeColor(string? raw, string fallback = "#1E293B")
+    {
+        string safeFallback = (fallback != null && fallback.StartsWith("#") && (fallback.Length == 4 || fallback.Length == 7 || fallback.Length == 9))
+            ? fallback
+            : "#1E293B";
+
+        if (string.IsNullOrWhiteSpace(raw)) return safeFallback;
+        raw = raw.Trim();
+
+        // 1. Valid Hex: #RGB, #RGBA, #RRGGBB, #RRGGBBAA
+        if (System.Text.RegularExpressions.Regex.IsMatch(raw, @"^#[0-9a-fA-F]{3,8}$"))
+        {
+            if (raw.Length == 4 || raw.Length == 5 || raw.Length == 7 || raw.Length == 9)
+                return raw;
+        }
+
+        // 2. rgb(...) or rgba(...) format
+        var rgbMatch = System.Text.RegularExpressions.Regex.Match(raw, @"rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (rgbMatch.Success &&
+            int.TryParse(rgbMatch.Groups[1].Value, out int r) &&
+            int.TryParse(rgbMatch.Groups[2].Value, out int g) &&
+            int.TryParse(rgbMatch.Groups[3].Value, out int b))
+        {
+            r = Math.Clamp(r, 0, 255);
+            g = Math.Clamp(g, 0, 255);
+            b = Math.Clamp(b, 0, 255);
+            return $"#{r:X2}{g:X2}{b:X2}";
+        }
+
+        // 3. Common CSS color names
+        return raw.ToLowerInvariant() switch
+        {
+            "black" => "#000000",
+            "white" => "#FFFFFF",
+            "red" => "#DC2626",
+            "blue" => "#2563EB",
+            "green" => "#16A34A",
+            "yellow" => "#CA8A04",
+            "orange" => "#EA580C",
+            "purple" => "#9333EA",
+            "gray" or "grey" => "#64748B",
+            _ => safeFallback
+        };
     }
 }

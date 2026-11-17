@@ -22,6 +22,7 @@ import {
 } from '@mui/material';
 
 import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CropIcon from '@mui/icons-material/Crop';
@@ -47,6 +48,8 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import FormatBoldIcon from '@mui/icons-material/FormatBold';
 import PaletteIcon from '@mui/icons-material/Palette';
+import FormatColorTextIcon from '@mui/icons-material/FormatColorText';
+import CheckIcon from '@mui/icons-material/Check';
 import FormatAlignLeftIcon from '@mui/icons-material/FormatAlignLeft';
 import FormatAlignCenterIcon from '@mui/icons-material/FormatAlignCenter';
 import FormatAlignRightIcon from '@mui/icons-material/FormatAlignRight';
@@ -66,8 +69,28 @@ const resolveImageUrl = (url) => {
   return `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
 };
 
+// ── FIX: Strip font-family / line-height / margin that get injected by pasted content ──
+const sanitizeHtml = (html) => {
+  if (!html) return html;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.querySelectorAll('*').forEach((el) => {
+    el.style.removeProperty('font-family');
+    el.style.removeProperty('line-height');
+    el.style.removeProperty('margin');
+    el.removeAttribute('face');
+  });
+  return tmp.innerHTML;
+};
+
+// ── FIX: Single default font + line height used on canvas (keep in sync with PDF) ──
+const DEFAULT_FONT = '"Inter", "Roboto", Arial, sans-serif';
+const DEFAULT_LINE_HEIGHT = 1.4;
+
 // Canva-style Format Painter (Paint Roller) cursor for copying & pasting slot dimensions
 const paintRollerCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cg transform='rotate(-20 16 16)'%3E%3Crect x='6' y='4' width='18' height='8' rx='2.5' fill='%232563EB' stroke='%231D4ED8' stroke-width='1.5'/%3E%3Crect x='8' y='6' width='14' height='2' rx='1' fill='%2360A5FA'/%3E%3Cpath d='M15 12v4a3 3 0 0 1-3 3h-2v8a2 2 0 0 0 4 0v-8h1a3 3 0 0 0 3-3v-4' fill='none' stroke='%23334155' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='12' y='21' width='4' height='7' rx='1.5' fill='%23F59E0B' stroke='%23B45309' stroke-width='1'/%3E%3C/g%3E%3C/svg%3E") 4 4, crosshair`;
+
+const isTextSlot = (slot) => !!slot && (slot.type === 'text' || (slot.id && slot.id.startsWith('text-')));
 
 export default function TemplateBuilder() {
   const colors = useThemeColors();
@@ -105,6 +128,23 @@ export default function TemplateBuilder() {
   // Canva-style Format Painter (Copy Size / Dimensions) state
   const [copiedDimensions, setCopiedDimensions] = useState(null); // { width: number, height: number, sourceId: string }
   const [hoveredSlotId, setHoveredSlotId] = useState(null);
+
+  // Canva-style Inline Rich Text Editing State
+  const [editingTextSlotId, setEditingTextSlotId] = useState(null);
+  const activeContentEditableRef = useRef(null);
+
+  // Dynamic Database Keyword Placeholders & Mappings
+  const defaultKeywords = {
+    WebinarName: 'wms.Webinars.WebinarName',
+    StudentName: 'wms.Users.FirstName + LastName',
+    Year: 'wms.Users.Year',
+    Department: 'wms.Users.Department',
+    WebinarDate: 'wms.Webinars.WebinarDate',
+    CertificateId: 'wms.WebinarCompleted.CertificateCode'
+  };
+  const [keywordsMapping, setKeywordsMapping] = useState(defaultKeywords);
+  const [newKeywordLabel, setNewKeywordLabel] = useState('');
+  const [newKeywordColumn, setNewKeywordColumn] = useState('wms.Webinars.WebinarName');
 
   // Saving state
   const [saving, setSaving] = useState(false);
@@ -240,6 +280,11 @@ export default function TemplateBuilder() {
         const config = JSON.parse(tpl.logoConfiguration);
         setDesignWidth(config.templateWidth || 0);
         setDesignHeight(config.templateHeight || 0);
+        if (config.keywords && typeof config.keywords === 'object') {
+          setKeywordsMapping({ ...defaultKeywords, ...config.keywords });
+        } else {
+          setKeywordsMapping(defaultKeywords);
+        }
         const parsedSlots = (config.logoSlots || []).map((s) => ({
           ...s,
           groupId: s.groupId || s.GroupId || null
@@ -373,7 +418,6 @@ export default function TemplateBuilder() {
   };
 
   // ── Live Update Row Config & Sync Directly to Canvas ────
-  // ── Live Update Row Config & Sync Directly to Canvas ────
   const updateRowConfigField = (field, val) => {
     const num = val === '' ? '' : parseInt(val, 10);
     const parsed = isNaN(num) || num === '' ? 0 : num;
@@ -418,6 +462,10 @@ export default function TemplateBuilder() {
   const handleTransformMouseDown = (e, slotId, handleType) => {
     e.stopPropagation();
     e.preventDefault();
+
+    if (editingTextSlotId && editingTextSlotId !== slotId) {
+      setEditingTextSlotId(null);
+    }
 
     const slot = logoSlots.find((s) => s.id === slotId);
     if (!slot) return;
@@ -628,6 +676,10 @@ export default function TemplateBuilder() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
 
+      if (!hasMoved) {
+        setEditingTextSlotId(null);
+      }
+
       setMarqueeBox(null);
       setTimeout(() => {
         isMarqueeRef.current = false;
@@ -753,6 +805,8 @@ export default function TemplateBuilder() {
       bold: true,
       fontSize: 26,
       align: 'center',
+      fontFamily: DEFAULT_FONT,
+      lineHeight: DEFAULT_LINE_HEIGHT,
       groupId: null
     };
 
@@ -769,7 +823,7 @@ export default function TemplateBuilder() {
     setLogoSlots((prev) =>
       prev.map((slot) => {
         if (slot.id === selectedSlotId) {
-          if (field === 'fitMode' || field === 'text' || field === 'color' || field === 'align') {
+          if (field === 'fitMode' || field === 'text' || field === 'textHtml' || field === 'color' || field === 'align') {
             return { ...slot, [field]: value };
           }
           if (field === 'bold') {
@@ -802,6 +856,114 @@ export default function TemplateBuilder() {
       }
       return prev;
     });
+  };
+
+  // Canva-style: Live Sync rich text from contentEditable div
+  // FIX: sanitize HTML so pasted fonts / line-heights never get stored
+  const updateSelectedSlotRichText = (html, plainText) => {
+    if (!selectedSlotId) return;
+    setLogoSlots((prev) =>
+      prev.map((slot) => {
+        if (slot.id === selectedSlotId) {
+          return {
+            ...slot,
+            textHtml: sanitizeHtml(html),
+            text: plainText !== undefined ? plainText : slot.text
+          };
+        }
+        return slot;
+      })
+    );
+  };
+
+  // Selection Range tracking so toolbar clicks never lose selection
+  const savedSelectionRangeRef = useRef(null);
+
+  const saveCurrentSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && activeContentEditableRef.current) {
+      const range = sel.getRangeAt(0);
+      if (activeContentEditableRef.current.contains(range.commonAncestorContainer)) {
+        savedSelectionRangeRef.current = range.cloneRange();
+      }
+    }
+  };
+
+  const restoreCurrentSelection = () => {
+    if (savedSelectionRangeRef.current) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedSelectionRangeRef.current);
+    }
+  };
+
+  // Canva-style: Format highlighted text selection alone (or whole slot fallback)
+  const applyFormatToSelection = (type, value) => {
+    restoreCurrentSelection();
+    const sel = window.getSelection();
+    const hasSelection =
+      editingTextSlotId &&
+      sel &&
+      sel.rangeCount > 0 &&
+      !sel.isCollapsed &&
+      activeContentEditableRef.current &&
+      activeContentEditableRef.current.contains(sel.anchorNode);
+
+    if (hasSelection) {
+      if (type === 'bold') {
+        document.execCommand('bold', false, null);
+      } else if (type === 'color') {
+        document.execCommand('styleWithCSS', false, true);
+        document.execCommand('foreColor', false, value);
+      } else if (type === 'fontSize') {
+        try {
+          const range = sel.getRangeAt(0);
+          const selectedContent = range.extractContents();
+          const span = document.createElement('span');
+          span.style.fontSize = `${value}px`;
+          span.appendChild(selectedContent);
+          range.insertNode(span);
+          sel.removeAllRanges();
+          const newRange = document.createRange();
+          newRange.selectNodeContents(span);
+          sel.addRange(newRange);
+        } catch (e) {
+          console.warn('Could not wrap selection in span, setting slot fontSize:', e);
+          updateSelectedSlot('fontSize', value);
+          if (activeContentEditableRef.current) {
+            activeContentEditableRef.current.style.fontSize = `${value}px`;
+          }
+        }
+      }
+
+      if (activeContentEditableRef.current) {
+        const newHtml = activeContentEditableRef.current.innerHTML;
+        const plainText = activeContentEditableRef.current.innerText;
+        updateSelectedSlotRichText(newHtml, plainText);
+      }
+      saveCurrentSelection();
+      return;
+    }
+
+    // Fallback: Format the whole slot
+    if (type === 'bold') {
+      updateSelectedSlot('bold', value);
+      if (activeContentEditableRef.current && editingTextSlotId === selectedSlotId) {
+        activeContentEditableRef.current.style.fontWeight = value ? '800' : '400';
+      }
+    } else if (type === 'color') {
+      updateSelectedSlot('color', value);
+      if (activeContentEditableRef.current && editingTextSlotId === selectedSlotId) {
+        activeContentEditableRef.current.style.color = value;
+      }
+    } else if (type === 'fontSize') {
+      const num = value === '' ? '' : parseInt(value, 10);
+      const parsed = isNaN(num) || num === '' ? 24 : num;
+      updateSelectedSlot('fontSize', parsed);
+      if (activeContentEditableRef.current && editingTextSlotId === selectedSlotId) {
+        activeContentEditableRef.current.style.fontSize = `${parsed}px`;
+      }
+    }
   };
 
   // ── Canva Copy Slot Dimensions (Format Painter) ───────────
@@ -1163,6 +1325,7 @@ export default function TemplateBuilder() {
         templateWidth: designWidth,
         templateHeight: designHeight,
         backgroundUrl,
+        keywords: keywordsMapping,
         logoSlots: logoSlots.map((s) => ({
           id: s.id,
           type: s.type || (s.id && s.id.startsWith('text-') ? 'text' : 'slot'),
@@ -1176,10 +1339,13 @@ export default function TemplateBuilder() {
           groupId: s.groupId || null,
           fitMode: s.fitMode || 'cover',
           text: s.text || null,
+          textHtml: s.textHtml ? sanitizeHtml(s.textHtml) : null,
           color: s.color || null,
           bold: !!s.bold,
           fontSize: s.fontSize || null,
-          align: s.align || null
+          align: s.align || null,
+          fontFamily: s.fontFamily || null,
+          lineHeight: s.lineHeight || null
         }))
       };
 
@@ -2038,6 +2204,7 @@ export default function TemplateBuilder() {
                   {logoSlots.map((slot) => {
                     const isSelected = selectedSlotIds.includes(slot.id) || selectedSlotId === slot.id;
                     const isHoveredForPaste = copiedDimensions && hoveredSlotId === slot.id;
+                    const slotIsText = isTextSlot(slot);
 
                     return (
                       <Box
@@ -2103,7 +2270,7 @@ export default function TemplateBuilder() {
                             ? '2px solid #2563EB'
                             : slot.groupId
                             ? '2px solid #93C5FD'
-                            : (slot.type === 'text' || (slot.id && slot.id.startsWith('text-')))
+                            : slotIsText
                             ? '1.5px dashed rgba(37, 99, 235, 0.45)'
                             : '2px dashed #D97706',
                           boxShadow: isHoveredForPaste
@@ -2118,10 +2285,10 @@ export default function TemplateBuilder() {
                             : copiedDimensions
                             ? 'rgba(37, 99, 235, 0.08)'
                             : isSelected
-                            ? (slot.type === 'text' || (slot.id && slot.id.startsWith('text-'))) ? 'rgba(37, 99, 235, 0.08)' : 'rgba(37, 99, 235, 0.14)'
+                            ? slotIsText ? 'rgba(37, 99, 235, 0.08)' : 'rgba(37, 99, 235, 0.14)'
                             : slot.groupId
-                            ? (slot.type === 'text' || (slot.id && slot.id.startsWith('text-'))) ? 'rgba(37, 99, 235, 0.04)' : 'rgba(37, 99, 235, 0.06)'
-                            : (slot.type === 'text' || (slot.id && slot.id.startsWith('text-')))
+                            ? slotIsText ? 'rgba(37, 99, 235, 0.04)' : 'rgba(37, 99, 235, 0.06)'
+                            : slotIsText
                             ? 'transparent'
                             : 'rgba(242, 183, 5, 0.16)',
                           borderRadius: '4px',
@@ -2187,25 +2354,221 @@ export default function TemplateBuilder() {
                           </Box>
                         )}
 
+                        {/* Canva-style Floating Rich Text Toolbar when editing */}
+                        {editingTextSlotId === slot.id && (
+                          <Paper
+                            elevation={6}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                            }}
+                            sx={{
+                              position: 'absolute',
+                              bottom: 'calc(100% + 12px)',
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              zIndex: 100,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.8,
+                              px: 1.2,
+                              py: 0.6,
+                              borderRadius: '10px',
+                              bgcolor: '#0F172A',
+                              color: '#FFFFFF',
+                              boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            <Typography sx={{ fontSize: '11px', fontWeight: 800, color: '#94A3B8', pr: 0.5, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              Selection:
+                            </Typography>
+
+                            {/* Bold Button */}
+                            <Tooltip title="Bold selected text (or entire block)">
+                              <IconButton
+                                size="small"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  applyFormatToSelection('bold', !slot.bold);
+                                }}
+                                sx={{
+                                  color: '#FFFFFF',
+                                  bgcolor: 'rgba(255,255,255,0.1)',
+                                  borderRadius: '6px',
+                                  p: 0.6,
+                                  '&:hover': { bgcolor: '#2563EB' }
+                                }}
+                              >
+                                <FormatBoldIcon sx={{ fontSize: 17 }} />
+                              </IconButton>
+                            </Tooltip>
+
+                            <Divider orientation="vertical" flexItem sx={{ bgcolor: 'rgba(255,255,255,0.2)', mx: 0.3 }} />
+
+                            {/* Font Size Decrement */}
+                            <Tooltip title="Decrease Font Size (-2px)">
+                              <IconButton
+                                size="small"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const current = slot.fontSize || 24;
+                                  applyFormatToSelection('fontSize', Math.max(8, current - 2));
+                                }}
+                                sx={{
+                                  color: '#FFFFFF',
+                                  bgcolor: 'rgba(255,255,255,0.1)',
+                                  borderRadius: '6px',
+                                  p: 0.5,
+                                  '&:hover': { bgcolor: '#2563EB' }
+                                }}
+                              >
+                                <RemoveIcon sx={{ fontSize: 15 }} />
+                              </IconButton>
+                            </Tooltip>
+
+                            {/* Font Size Display */}
+                            <Typography sx={{ fontSize: '12px', fontWeight: 800, color: '#38BDF8', px: 0.4 }}>
+                              {slot.fontSize || 24}px
+                            </Typography>
+
+                            {/* Font Size Increment */}
+                            <Tooltip title="Increase Font Size (+2px)">
+                              <IconButton
+                                size="small"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const current = slot.fontSize || 24;
+                                  applyFormatToSelection('fontSize', Math.min(300, current + 2));
+                                }}
+                                sx={{
+                                  color: '#FFFFFF',
+                                  bgcolor: 'rgba(255,255,255,0.1)',
+                                  borderRadius: '6px',
+                                  p: 0.5,
+                                  '&:hover': { bgcolor: '#2563EB' }
+                                }}
+                              >
+                                <AddIcon sx={{ fontSize: 15 }} />
+                              </IconButton>
+                            </Tooltip>
+
+                            <Divider orientation="vertical" flexItem sx={{ bgcolor: 'rgba(255,255,255,0.2)', mx: 0.3 }} />
+
+                            {/* Color Swatches */}
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, px: 0.5 }}>
+                              {['#1E293B', '#2563EB', '#D97706', '#059669', '#DC2626', '#FFFFFF'].map((c) => (
+                                <Box
+                                  key={c}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    applyFormatToSelection('color', c);
+                                  }}
+                                  sx={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: '50%',
+                                    bgcolor: c,
+                                    border: '1.5px solid #FFFFFF',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                                    transition: 'transform 0.12s',
+                                    '&:hover': { transform: 'scale(1.25)' }
+                                  }}
+                                  title={`Color: ${c}`}
+                                />
+                              ))}
+                            </Box>
+
+                            {/* Custom Color Input */}
+                            <Tooltip title="Custom Color for selection">
+                              <Box sx={{ position: 'relative', width: 22, height: 22, display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                                <FormatColorTextIcon sx={{ fontSize: 19, color: '#FCD34D' }} />
+                                <input
+                                  type="color"
+                                  value={slot.color || '#1E293B'}
+                                  onChange={(e) => applyFormatToSelection('color', e.target.value)}
+                                  style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    opacity: 0,
+                                    cursor: 'pointer',
+                                    width: '100%',
+                                    height: '100%'
+                                  }}
+                                />
+                              </Box>
+                            </Tooltip>
+
+                            <Divider orientation="vertical" flexItem sx={{ bgcolor: 'rgba(255,255,255,0.2)', mx: 0.5 }} />
+
+                            {/* Done Button */}
+                            <Button
+                              size="small"
+                              variant="contained"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setEditingTextSlotId(null);
+                              }}
+                              startIcon={<CheckIcon sx={{ fontSize: 14 }} />}
+                              sx={{
+                                textTransform: 'none',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                px: 1.2,
+                                py: 0.3,
+                                minWidth: 0,
+                                bgcolor: '#2563EB',
+                                borderRadius: '6px',
+                                '&:hover': { bgcolor: '#1D4ED8' }
+                              }}
+                            >
+                              Done
+                            </Button>
+                          </Paper>
+                        )}
+
                         {/* Inner Body: Click or drag to move */}
                         <Box
                           onMouseDown={(e) => {
                             if (copiedDimensions) return;
+                            if (editingTextSlotId === slot.id) {
+                              e.stopPropagation();
+                              return;
+                            }
                             handleTransformMouseDown(e, slot.id, 'move');
+                          }}
+                          onDoubleClick={(e) => {
+                            if (slotIsText) {
+                              e.stopPropagation();
+                              setSelectedSlotId(slot.id);
+                              setSelectedSlotIds([slot.id]);
+                              setEditingTextSlotId(slot.id);
+                              setTimeout(() => {
+                                if (activeContentEditableRef.current) {
+                                  activeContentEditableRef.current.focus();
+                                }
+                              }, 50);
+                            }
                           }}
                           sx={{
                             width: '100%',
                             height: '100%',
-                            cursor: copiedDimensions ? paintRollerCursor : 'move',
+                            cursor: copiedDimensions ? paintRollerCursor : editingTextSlotId === slot.id ? 'text' : 'move',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             position: 'relative',
-                            overflow: 'hidden',
+                            overflow: slotIsText ? 'visible' : 'hidden',
                             borderRadius: '3px'
                           }}
                         >
-                          {(slot.type === 'text' || (slot.id && slot.id.startsWith('text-'))) ? (
+                          {slotIsText ? (
                             <Box
                               sx={{
                                 width: '100%',
@@ -2214,24 +2577,78 @@ export default function TemplateBuilder() {
                                 alignItems: 'center',
                                 justifyContent: slot.align === 'left' ? 'flex-start' : slot.align === 'right' ? 'flex-end' : 'center',
                                 px: 1.5,
-                                userSelect: 'none',
-                                pointerEvents: 'none',
-                                overflow: 'hidden'
+                                userSelect: editingTextSlotId === slot.id ? 'text' : 'none',
+                                pointerEvents: editingTextSlotId === slot.id ? 'auto' : 'none',
+                                overflow: 'visible'
                               }}
                             >
-                              <Typography
-                                sx={{
-                                  color: slot.color || '#1E293B',
-                                  fontWeight: slot.bold ? 800 : 400,
-                                  fontSize: slot.fontSize ? `${slot.fontSize}px` : `${Math.max(12, Math.min(48, Math.round(slot.height * 0.52)))}px`,
-                                  lineHeight: 1.25,
-                                  wordBreak: 'break-word',
-                                  textAlign: slot.align || 'center',
-                                  width: '100%'
-                                }}
-                              >
-                                {slot.text || 'Heading Text'}
-                              </Typography>
+                              {editingTextSlotId === slot.id ? (
+                                <div
+                                  ref={(el) => {
+                                    activeContentEditableRef.current = el;
+                                    if (el && el.dataset.initializedForSlot !== slot.id) {
+                                      el.dataset.initializedForSlot = slot.id;
+                                      // FIX: sanitize on load so old saved styles don't leak in
+                                      el.innerHTML = sanitizeHtml(slot.textHtml) || slot.text || 'Heading Text';
+                                    }
+                                  }}
+                                  contentEditable
+                                  suppressContentEditableWarning
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onMouseUp={(e) => {
+                                    e.stopPropagation();
+                                    saveCurrentSelection();
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onDoubleClick={(e) => e.stopPropagation()}
+                                  onKeyUp={() => saveCurrentSelection()}
+                                  // FIX: paste as plain text only (blocks font-family / line-height from Word, Canva, web)
+                                  onPaste={(e) => {
+                                    e.preventDefault();
+                                    const text = e.clipboardData.getData('text/plain');
+                                    document.execCommand('insertText', false, text);
+                                  }}
+                                  onBlur={(e) => {
+                                    const newHtml = e.currentTarget.innerHTML;
+                                    const plainText = e.currentTarget.innerText;
+                                    updateSelectedSlotRichText(newHtml, plainText);
+                                  }}
+                                  style={{
+                                    width: '100%',
+                                    outline: 'none',
+                                    color: slot.color || '#1E293B',
+                                    fontWeight: slot.bold ? 800 : 400,
+                                    fontSize: slot.fontSize ? `${slot.fontSize}px` : `${Math.max(12, Math.min(48, Math.round(slot.height * 0.52)))}px`,
+                                    fontFamily: slot.fontFamily || DEFAULT_FONT,
+                                    lineHeight: slot.lineHeight || DEFAULT_LINE_HEIGHT,
+                                    wordBreak: 'break-word',
+                                    textAlign: slot.align || 'center',
+                                    cursor: 'text'
+                                  }}
+                                />
+                              ) : (
+                                <Typography
+                                  component="div"
+                                  sx={{
+                                    color: slot.color || '#1E293B',
+                                    fontWeight: slot.bold ? 800 : 400,
+                                    fontSize: slot.fontSize ? `${slot.fontSize}px` : `${Math.max(12, Math.min(48, Math.round(slot.height * 0.52)))}px`,
+                                    fontFamily: slot.fontFamily || DEFAULT_FONT,
+                                    lineHeight: slot.lineHeight || DEFAULT_LINE_HEIGHT,
+                                    wordBreak: 'break-word',
+                                    textAlign: slot.align || 'center',
+                                    width: '100%',
+                                    // FIX: force every nested span to inherit our font + line height
+                                    '& *': {
+                                      fontFamily: 'inherit !important',
+                                      lineHeight: 'inherit !important'
+                                    }
+                                  }}
+                                  dangerouslySetInnerHTML={slot.textHtml ? { __html: sanitizeHtml(slot.textHtml) } : undefined}
+                                >
+                                  {slot.textHtml ? undefined : (slot.text || 'Heading Text')}
+                                </Typography>
+                              )}
                             </Box>
                           ) : slot.imageUrl ? (
                             <Box
@@ -2543,21 +2960,21 @@ export default function TemplateBuilder() {
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  {(selectedSlot.type === 'text' || (selectedSlot.id && selectedSlot.id.startsWith('text-'))) ? (
+                  {isTextSlot(selectedSlot) ? (
                     <TextFieldsIcon sx={{ color: '#2563EB', fontSize: 20 }} />
                   ) : (
                     <CropIcon sx={{ color: '#D97706', fontSize: 18 }} />
                   )}
                   <Typography variant="subtitle2" sx={{ fontWeight: 800, color: colors.textPrimary }}>
-                    {(selectedSlot.type === 'text' || (selectedSlot.id && selectedSlot.id.startsWith('text-'))) ? 'Text' : 'Slot'}: {selectedSlot.id}
+                    {isTextSlot(selectedSlot) ? 'Text' : 'Slot'}: {selectedSlot.id}
                   </Typography>
                   <Chip
-                    label={(selectedSlot.type === 'text' || (selectedSlot.id && selectedSlot.id.startsWith('text-'))) ? 'Text' : 'Slot'}
+                    label={isTextSlot(selectedSlot) ? 'Text' : 'Slot'}
                     size="small"
                     sx={{
                       fontWeight: 800,
-                      bgcolor: (selectedSlot.type === 'text' || (selectedSlot.id && selectedSlot.id.startsWith('text-'))) ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)',
-                      color: (selectedSlot.type === 'text' || (selectedSlot.id && selectedSlot.id.startsWith('text-'))) ? '#2563EB' : '#D97706',
+                      bgcolor: isTextSlot(selectedSlot) ? 'rgba(37,99,235,0.12)' : 'rgba(217,119,6,0.12)',
+                      color: isTextSlot(selectedSlot) ? '#2563EB' : '#D97706',
                       height: 20
                     }}
                   />
@@ -2588,7 +3005,7 @@ export default function TemplateBuilder() {
               <Box sx={{ display: 'flex', gap: 0.8, flexWrap: 'wrap' }}>
                 {logoSlots.map((s) => {
                   const isItemSel = selectedSlotIds.includes(s.id) || selectedSlotId === s.id;
-                  const isTextItem = s.type === 'text' || (s.id && s.id.startsWith('text-'));
+                  const isTextItem = isTextSlot(s);
                   return (
                     <Chip
                       key={s.id}
@@ -2721,7 +3138,7 @@ export default function TemplateBuilder() {
                 </Box>
               )}
 
-              {(selectedSlot.type === 'text' || (selectedSlot.id && selectedSlot.id.startsWith('text-'))) ? (
+              {isTextSlot(selectedSlot) ? (
                 /* TEXT ELEMENT CONTROLS */
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {/* Card 1: Text Content */}
@@ -2735,7 +3152,14 @@ export default function TemplateBuilder() {
                       rows={2}
                       size="small"
                       value={selectedSlot.text || ''}
-                      onChange={(e) => updateSelectedSlot('text', e.target.value)}
+                      onChange={(e) => {
+                        const newText = e.target.value;
+                        updateSelectedSlot('text', newText);
+                        // If textHtml doesn't contain rich HTML tags (e.g. <b> or <span), keep them in sync
+                        if (!selectedSlot.textHtml || !selectedSlot.textHtml.includes('<')) {
+                          updateSelectedSlot('textHtml', newText);
+                        }
+                      }}
                       placeholder="Enter certificate text..."
                       sx={{
                         bgcolor: '#FFFFFF',
@@ -2747,9 +3171,153 @@ export default function TemplateBuilder() {
                         }
                       }}
                     />
+                    <Typography variant="caption" sx={{ color: '#2563EB', fontWeight: 650, display: 'block', mt: 1, fontSize: '11px' }}>
+                      💡 Tip: Double-click text on the canvas to highlight specific words & apply unique colors or bold styles (Canva-style)!
+                    </Typography>
+
+                    {/* One-click Dynamic Database Placeholders Chips */}
+                    <Box sx={{ mt: 1.8, pt: 1.5, borderTop: `1px dashed ${colors.border}` }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.8 }}>
+                        <Typography variant="caption" sx={{ color: '#2563EB', fontWeight: 800, fontSize: '11px', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <span>✨ Dynamic Database Placeholders:</span>
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '10px' }}>
+                          Click chip to insert
+                        </Typography>
+                      </Box>
+
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.6 }}>
+                        {Object.entries(keywordsMapping).map(([key, col]) => (
+                          <Tooltip key={key} title={`Click to insert {${key}} (Maps to: ${col})`}>
+                            <Chip
+                              label={`{${key}}`}
+                              size="small"
+                              onClick={() => {
+                                const token = `{${key}}`;
+                                const current = selectedSlot.text || '';
+                                const updated = current ? `${current} ${token}` : token;
+                                updateSelectedSlot('text', updated);
+                                if (selectedSlot.textHtml) {
+                                  updateSelectedSlot('textHtml', `${selectedSlot.textHtml} ${token}`);
+                                } else {
+                                  updateSelectedSlot('textHtml', updated);
+                                }
+                                if (activeContentEditableRef.current && editingTextSlotId === selectedSlot.id) {
+                                  activeContentEditableRef.current.innerText = updated;
+                                }
+                              }}
+                              sx={{
+                                fontWeight: 750,
+                                fontSize: '11px',
+                                bgcolor: '#EFF6FF',
+                                color: '#1D4ED8',
+                                border: '1px solid #BFDBFE',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                '&:hover': {
+                                  bgcolor: '#2563EB',
+                                  color: '#FFFFFF',
+                                  transform: 'translateY(-1px)'
+                                }
+                              }}
+                            />
+                          </Tooltip>
+                        ))}
+                      </Box>
+                    </Box>
                   </Box>
 
-                  {/* Card 2: Typography Styling (Bold, Align, Font Size) */}
+                  {/* Card 1B: Dynamic Database Field Mappings */}
+                  <Box sx={{ p: 2, borderRadius: '14px', bgcolor: colors.surfaceAlt, border: `1px solid ${colors.border}` }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.2 }}>
+                      <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 800 }}>
+                        Placeholder & Database Mappings
+                      </Typography>
+                      <Chip label={`${Object.keys(keywordsMapping).length} Mapped`} size="small" sx={{ bgcolor: '#ECFDF5', color: '#047857', fontWeight: 800, fontSize: '10px' }} />
+                    </Box>
+
+                    {/* Mappings Table */}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8, mb: 1.5, maxHeight: 180, overflowY: 'auto' }}>
+                      {Object.entries(keywordsMapping).map(([key, col]) => (
+                        <Box
+                          key={key}
+                          sx={{
+                            p: 0.8,
+                            borderRadius: '8px',
+                            bgcolor: '#FFFFFF',
+                            border: `1px solid ${colors.border}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between'
+                          }}
+                        >
+                          <Typography sx={{ fontWeight: 800, fontSize: '11px', color: '#1D4ED8' }}>
+                            {`{${key}}`}
+                          </Typography>
+                          <Typography sx={{ fontSize: '10px', color: '#475569', bgcolor: '#F1F5F9', px: 0.8, py: 0.2, borderRadius: '4px', fontFamily: 'monospace' }}>
+                            {col}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+
+                    {/* Add Custom Placeholder Mapping Form */}
+                    <Box sx={{ pt: 1, borderTop: `1px dashed ${colors.border}` }}>
+                      <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 700, display: 'block', mb: 0.6 }}>
+                        + Add Custom Placeholder:
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.8 }}>
+                        <TextField
+                          size="small"
+                          placeholder="Placeholder name (e.g. MyTitle)"
+                          value={newKeywordLabel}
+                          onChange={(e) => setNewKeywordLabel(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                          sx={{ bgcolor: '#FFFFFF' }}
+                        />
+                        <TextField
+                          select
+                          size="small"
+                          value={newKeywordColumn}
+                          onChange={(e) => setNewKeywordColumn(e.target.value)}
+                          sx={{ bgcolor: '#FFFFFF' }}
+                          SelectProps={{ native: true }}
+                        >
+                          <option value="wms.Webinars.WebinarName">wms.Webinars.WebinarName</option>
+                          <option value="wms.Users.Year">wms.Users.Year</option>
+                          <option value="wms.Users.Department">wms.Users.Department</option>
+                          <option value="wms.Users.FullName">wms.Users.FullName</option>
+                          <option value="wms.Webinars.WebinarDate">wms.Webinars.WebinarDate</option>
+                          <option value="wms.Webinars.ConductorName">wms.Webinars.ConductorName</option>
+                          <option value="wms.WebinarCompleted.CertificateCode">wms.WebinarCompleted.CertificateCode</option>
+                        </TextField>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={!newKeywordLabel.trim()}
+                          onClick={() => {
+                            if (!newKeywordLabel.trim()) return;
+                            setKeywordsMapping((prev) => ({
+                              ...prev,
+                              [newKeywordLabel.trim()]: newKeywordColumn
+                            }));
+                            setNewKeywordLabel('');
+                            toast.success(`Mapped {${newKeywordLabel.trim()}} -> ${newKeywordColumn}`);
+                          }}
+                          sx={{
+                            textTransform: 'none',
+                            fontWeight: 700,
+                            fontSize: '11px',
+                            bgcolor: '#2563EB',
+                            borderRadius: '8px'
+                          }}
+                        >
+                          Add Mapping
+                        </Button>
+                      </Box>
+                    </Box>
+                  </Box>
+
+                  {/* Card 2: Typography Styling (Bold, Align, Font Size, Line Height) */}
                   <Box sx={{ p: 2, borderRadius: '14px', bgcolor: colors.surfaceAlt, border: `1px solid ${colors.border}` }}>
                     <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 700, display: 'block', mb: 1.2 }}>
                       Typography & Style
@@ -2760,7 +3328,8 @@ export default function TemplateBuilder() {
                       <Button
                         size="small"
                         variant={selectedSlot.bold ? 'contained' : 'outlined'}
-                        onClick={() => updateSelectedSlot('bold', !selectedSlot.bold)}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyFormatToSelection('bold', !selectedSlot.bold)}
                         startIcon={<FormatBoldIcon />}
                         sx={{
                           textTransform: 'none',
@@ -2779,6 +3348,7 @@ export default function TemplateBuilder() {
                       <Box sx={{ display: 'flex', border: `1px solid ${colors.border}`, borderRadius: '8px', overflow: 'hidden' }}>
                         <IconButton
                           size="small"
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => updateSelectedSlot('align', 'left')}
                           sx={{
                             borderRadius: 0,
@@ -2792,6 +3362,7 @@ export default function TemplateBuilder() {
                         </IconButton>
                         <IconButton
                           size="small"
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => updateSelectedSlot('align', 'center')}
                           sx={{
                             borderRadius: 0,
@@ -2805,6 +3376,7 @@ export default function TemplateBuilder() {
                         </IconButton>
                         <IconButton
                           size="small"
+                          onMouseDown={(e) => e.preventDefault()}
                           onClick={() => updateSelectedSlot('align', 'right')}
                           sx={{
                             borderRadius: 0,
@@ -2819,17 +3391,39 @@ export default function TemplateBuilder() {
                       </Box>
                     </Box>
 
-                    {/* Font Size Input */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                    {/* Font Size + Line Height Inputs */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                       <TextField
                         label="Font Size (px)"
                         type="number"
                         size="small"
                         value={selectedSlot.fontSize || 24}
-                        onChange={(e) => updateSelectedSlot('fontSize', e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? '' : parseInt(e.target.value, 10);
+                          const parsed = isNaN(val) ? '' : val;
+                          updateSelectedSlot('fontSize', parsed);
+                          if (activeContentEditableRef.current && editingTextSlotId === selectedSlot.id) {
+                            activeContentEditableRef.current.style.fontSize = parsed ? `${parsed}px` : '24px';
+                          }
+                        }}
                         sx={{ width: 140, bgcolor: '#FFFFFF' }}
                       />
-                      <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '11px' }}>
+                      <TextField
+                        label="Line Height"
+                        type="number"
+                        size="small"
+                        inputProps={{ step: 0.1, min: 0.8, max: 3 }}
+                        value={selectedSlot.lineHeight || DEFAULT_LINE_HEIGHT}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          const lh = isNaN(v) ? DEFAULT_LINE_HEIGHT : Math.min(3, Math.max(0.8, v));
+                          setLogoSlots((prev) =>
+                            prev.map((s) => (s.id === selectedSlot.id ? { ...s, lineHeight: lh } : s))
+                          );
+                        }}
+                        sx={{ width: 120, bgcolor: '#FFFFFF' }}
+                      />
+                      <Typography variant="caption" sx={{ color: colors.textSecondary, fontSize: '11px', width: '100%' }}>
                         Scales on canvas & PDF
                       </Typography>
                     </Box>
@@ -2862,7 +3456,7 @@ export default function TemplateBuilder() {
                       <input
                         type="color"
                         value={selectedSlot.color || '#1E293B'}
-                        onChange={(e) => updateSelectedSlot('color', e.target.value)}
+                        onChange={(e) => applyFormatToSelection('color', e.target.value)}
                         style={{
                           width: 44,
                           height: 40,
@@ -2875,7 +3469,7 @@ export default function TemplateBuilder() {
                       <TextField
                         size="small"
                         value={selectedSlot.color || '#1E293B'}
-                        onChange={(e) => updateSelectedSlot('color', e.target.value)}
+                        onChange={(e) => applyFormatToSelection('color', e.target.value)}
                         placeholder="#1E293B"
                         sx={{ flex: 1, bgcolor: '#FFFFFF' }}
                       />
@@ -2901,7 +3495,8 @@ export default function TemplateBuilder() {
                       ].map((c) => (
                         <Box
                           key={c}
-                          onClick={() => updateSelectedSlot('color', c)}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyFormatToSelection('color', c)}
                           sx={{
                             width: 24,
                             height: 24,

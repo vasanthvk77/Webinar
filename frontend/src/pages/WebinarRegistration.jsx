@@ -1440,14 +1440,15 @@ const WebinarRegistration = ({ mode }) => {
   const info = webinarInfo || {};
 
   // Derive active country code for dynamic pricing
-  const activeCountryCode = existingUser?.countryCode || formData.countryCode || webinarInfo?.countryPrices?.[0]?.countryCode || "+91";
+  const activeCountryCode = existingUser?.countryCode || formData.countryCode || "+91";
 
   // Match price configured for this country in wms.WebinarPayments
   const matchedCountryPrice = (webinarInfo?.countryPrices || []).find(
     (p) => p.countryCode === activeCountryCode || p.countryCode?.replace(/[^\d]/g, '') === activeCountryCode?.replace(/[^\d]/g, '')
-  ) || webinarInfo?.countryPrices?.[0];
+  );
 
-  const currentPrice = matchedCountryPrice != null ? matchedCountryPrice.amount : (info.price || 0);
+  const isPriceAvailableForCountry = !info.isPaid || (matchedCountryPrice != null && matchedCountryPrice.amount > 0);
+  const currentPrice = matchedCountryPrice != null ? matchedCountryPrice.amount : 0;
   const currentCurrency = matchedCountryPrice?.currencySymbol || getCurrencySymbolFromCountryCode(activeCountryCode);
   const amount = Number(currentPrice || 0).toLocaleString();
   const isCapacityFull = Boolean(info.participantLimit && info.participantLimit > 0 && (info.registrationCount || 0) >= info.participantLimit);
@@ -1553,7 +1554,9 @@ const WebinarRegistration = ({ mode }) => {
 
                 <Stack direction="row" useFlexGap flexWrap="wrap" gap={1} sx={{ mt: 3 }}>
                   <Box sx={{ px: 1.75, py: .7, borderRadius: "999px", bgcolor: "#fef3c7", color: "#92400e", fontSize: 13, fontWeight: FW.semibold }}>
-                    {info.isPaid ? `${currentCurrency}${amount} per seat` : "Free to attend"}
+                    {info.isPaid
+                      ? (isPriceAvailableForCountry ? `${currentCurrency}${amount} per seat` : "Not available in your country")
+                      : "Free to attend"}
                   </Box>
                   {info.categoryName && (
                     <Box sx={{ px: 1.75, py: .7, borderRadius: "999px", border: "1px solid rgba(255,255,255,.35)", fontSize: 13, fontWeight: FW.regular }}>
@@ -1817,58 +1820,71 @@ const WebinarRegistration = ({ mode }) => {
                           Back
                         </Button>
 
-                        <Box sx={{ p: 2, borderRadius: "16px", bgcolor: colors.soft, border: `1px solid ${colors.line}` }}>
-                          <Stack direction="row" spacing={1.5} alignItems="flex-start">
-                            <Box sx={{ width: 40, height: 40, borderRadius: "12px", bgcolor: isDark ? "rgba(217,119,6,.18)" : "#fef3c7", color: colors.primary, display: "grid", placeItems: "center", flexShrink: 0 }}>
-                              <Video size={19} />
-                            </Box>
-                            <Box sx={{ minWidth: 0 }}>
-                              <Typography sx={{ fontSize: 15, fontWeight: FW.semibold, lineHeight: 1.4, overflowWrap: "anywhere" }}>Title - {info.webinarName}</Typography>
-                              <Typography sx={{ fontSize: 13, color: colors.muted, mt: .4 }}>Speaker - {info.conductorName || "Expert speaker"} / Duration - {info.durationMinutes || 60} minutes</Typography>
-                            </Box>
-                          </Stack>
-                          <Divider sx={{ my: 1.5, borderColor: colors.line }} />
-                          <Stack direction="row" justifyContent="space-between" alignItems="center">
-                            <Typography sx={{ fontSize: 14, color: colors.muted }}>Total (1 seat)</Typography>
-                            <Typography sx={{ fontSize: 26, fontWeight: FW.semibold, letterSpacing: "-.02em" }}>{currentCurrency}{amount}</Typography>
-                          </Stack>
-                        </Box>
-
-                        <Typography sx={{ ...labelSx, mb: 0 }}>Payment method</Typography>
-                        <RadioGroup value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} sx={{ gap: 1 }}>
-                          {[
-                            { value: "upi", title: "UPI", desc: "Google Pay, PhonePe, Paytm and more", icon: Smartphone },
-                            { value: "card", title: "Credit or debit card", desc: "Visa, Mastercard and RuPay", icon: CreditCard }
-                          ].map((method) => {
-                            const Icon = method.icon;
-                            const selected = paymentMethod === method.value;
-                            return (
-                              <Paper key={method.value} elevation={0} onClick={() => setPaymentMethod(method.value)} sx={{
-                                p: 1.1, borderRadius: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 1.25,
-                                border: `1.5px solid ${selected ? colors.primary : colors.line}`,
-                                bgcolor: selected ? (isDark ? "rgba(217,119,6,.15)" : "#fffbeb") : colors.panel,
-                                transition: "all .2s"
-                              }}>
-                                <Radio value={method.value} size="small" sx={{ p: .5, color: colors.muted, "&.Mui-checked": { color: colors.primary } }} />
-                                <Box sx={{ width: 38, height: 38, borderRadius: "11px", bgcolor: colors.soft, color: selected ? colors.primary : colors.muted, display: "grid", placeItems: "center", flexShrink: 0 }}>
-                                  <Icon size={18} />
+                        {!isPriceAvailableForCountry ? (
+                          <Box sx={{ p: 3, borderRadius: "16px", bgcolor: isDark ? "rgba(220,38,38,.1)" : "#fee2e2", border: "1px solid rgba(220,38,38,.2)", textAlign: "center" }}>
+                            <Typography sx={{ fontSize: 16, fontWeight: FW.semibold, color: colors.danger }}>
+                              Webinar not available in your region
+                            </Typography>
+                            <Typography sx={{ fontSize: 13.5, color: colors.muted, mt: 1 }}>
+                              Pricing has not been configured for your country ({activeCountryCode}). Please check back later or contact support.
+                            </Typography>
+                          </Box>
+                        ) : (
+                          <>
+                            <Box sx={{ p: 2, borderRadius: "16px", bgcolor: colors.soft, border: `1px solid ${colors.line}` }}>
+                              <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                                <Box sx={{ width: 40, height: 40, borderRadius: "12px", bgcolor: isDark ? "rgba(217,119,6,.18)" : "#fef3c7", color: colors.primary, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                                  <Video size={19} />
                                 </Box>
                                 <Box sx={{ minWidth: 0 }}>
-                                  <Typography sx={{ fontSize: 14, fontWeight: FW.semibold }}>{method.title}</Typography>
-                                  <Typography sx={{ fontSize: 12.5, color: colors.muted, mt: .2 }}>{method.desc}</Typography>
+                                  <Typography sx={{ fontSize: 15, fontWeight: FW.semibold, lineHeight: 1.4, overflowWrap: "anywhere" }}>Title - {info.webinarName}</Typography>
+                                  <Typography sx={{ fontSize: 13, color: colors.muted, mt: .4 }}>Speaker - {info.conductorName || "Expert speaker"} / Duration - {info.durationMinutes || 60} minutes</Typography>
                                 </Box>
-                              </Paper>
-                            );
-                          })}
-                        </RadioGroup>
+                              </Stack>
+                              <Divider sx={{ my: 1.5, borderColor: colors.line }} />
+                              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                <Typography sx={{ fontSize: 14, color: colors.muted }}>Total (1 seat)</Typography>
+                                <Typography sx={{ fontSize: 26, fontWeight: FW.semibold, letterSpacing: "-.02em" }}>{currentCurrency}{amount}</Typography>
+                              </Stack>
+                            </Box>
 
-                        <Button fullWidth disabled={paying} onClick={handleCompletePayment} endIcon={!paying && <ArrowRight size={18} />} sx={primaryButtonSx}>
-                          {paying ? <CircularProgress size={22} sx={{ color: "#fff" }} /> : `Pay ${currentCurrency}${amount}`}
-                        </Button>
-                        <Stack direction="row" alignItems="center" justifyContent="center" spacing={.8} sx={{ color: colors.muted }}>
-                          <ShieldCheck size={14} color={colors.green} />
-                          <Typography sx={{ fontSize: 12.5 }}>Secure payment · Your details stay protected</Typography>
-                        </Stack>
+                            <Typography sx={{ ...labelSx, mb: 0 }}>Payment method</Typography>
+                            <RadioGroup value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} sx={{ gap: 1 }}>
+                              {[
+                                { value: "upi", title: "UPI", desc: "Google Pay, PhonePe, Paytm and more", icon: Smartphone },
+                                { value: "card", title: "Credit or debit card", desc: "Visa, Mastercard and RuPay", icon: CreditCard }
+                              ].map((method) => {
+                                const Icon = method.icon;
+                                const selected = paymentMethod === method.value;
+                                return (
+                                  <Paper key={method.value} elevation={0} onClick={() => setPaymentMethod(method.value)} sx={{
+                                    p: 1.1, borderRadius: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 1.25,
+                                    border: `1.5px solid ${selected ? colors.primary : colors.line}`,
+                                    bgcolor: selected ? (isDark ? "rgba(217,119,6,.15)" : "#fffbeb") : colors.panel,
+                                    transition: "all .2s"
+                                  }}>
+                                    <Radio value={method.value} size="small" sx={{ p: .5, color: colors.muted, "&.Mui-checked": { color: colors.primary } }} />
+                                    <Box sx={{ width: 38, height: 38, borderRadius: "11px", bgcolor: colors.soft, color: selected ? colors.primary : colors.muted, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                                      <Icon size={18} />
+                                    </Box>
+                                    <Box sx={{ minWidth: 0 }}>
+                                      <Typography sx={{ fontSize: 14, fontWeight: FW.semibold }}>{method.title}</Typography>
+                                      <Typography sx={{ fontSize: 12.5, color: colors.muted, mt: .2 }}>{method.desc}</Typography>
+                                    </Box>
+                                  </Paper>
+                                );
+                              })}
+                            </RadioGroup>
+
+                            <Button fullWidth disabled={paying} onClick={handleCompletePayment} endIcon={!paying && <ArrowRight size={18} />} sx={primaryButtonSx}>
+                              {paying ? <CircularProgress size={22} sx={{ color: "#fff" }} /> : `Pay ${currentCurrency}${amount}`}
+                            </Button>
+                            <Stack direction="row" alignItems="center" justifyContent="center" spacing={.8} sx={{ color: colors.muted }}>
+                              <ShieldCheck size={14} color={colors.green} />
+                              <Typography sx={{ fontSize: 12.5 }}>Secure payment · Your details stay protected</Typography>
+                            </Stack>
+                          </>
+                        )}
                       </Stack>
                     )}
 

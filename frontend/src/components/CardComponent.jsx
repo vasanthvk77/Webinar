@@ -679,8 +679,8 @@ export default function CardComponent({
                 </Button>
               )}
 
-              {/* Google Calendar Tooltip Icon */}
-              {onCalendarClick && (
+              {/* Google Calendar Tooltip Icon: Don't show if StartTime < Current */}
+              {onCalendarClick && !isWebinarStartTimePast(webinar?.startTime) && (
                 <Tooltip title="Add to Google Calendar" arrow>
                   <IconButton
                     onClick={onCalendarClick}
