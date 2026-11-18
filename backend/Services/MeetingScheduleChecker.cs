@@ -100,6 +100,9 @@ public class MeetingScheduleChecker : BackgroundService
         // Check if any webinar is starting within 30 minutes without a meeting created, and alert the admin
         await CheckUnscheduledWebinarsAdminAlertAsync(conn, stoppingToken);
 
+        // Auto-End Sweeper: Terminate webinars that have exceeded EndTime + GracePeriod
+        await SweepAndEndExpiredMeetingsAsync(conn, stoppingToken);
+
         // Fast query driven by filtered index IX_Meetings_PendingCreation
         var candidates = (await conn.QueryAsync<PendingMeetingScheduleDto>(
             "wms.CheckMeetingSchedule",
@@ -215,9 +218,13 @@ public class MeetingScheduleChecker : BackgroundService
 
             if (!string.IsNullOrWhiteSpace(_serverToServerUrl) && !_serverToServerUrl.Equals("nothing now yet", StringComparison.OrdinalIgnoreCase))
             {
-                parameters.Add(new("meetingEndedURL", _serverToServerUrl));
+                var callbackWithId = _serverToServerUrl.Contains('?')
+                    ? $"{_serverToServerUrl}&meetingID={Uri.EscapeDataString(meeting.MeetingID)}"
+                    : $"{_serverToServerUrl}?meetingID={Uri.EscapeDataString(meeting.MeetingID)}";
+
+                parameters.Add(new("meetingEndedURL", callbackWithId));
                 parameters.Add(new("meetingKeepEvents", "true"));
-                parameters.Add(new("meta_analytics-callback-url", _serverToServerUrl));
+                parameters.Add(new("meta_analytics-callback-url", callbackWithId));
             }
 
             // Encode query string
@@ -278,6 +285,33 @@ public class MeetingScheduleChecker : BackgroundService
                     new { Id = meeting.Id, MeetingCreatedAt = meetingCreatedAt, ModeratorJoinUrl = moderatorJoinUrl },
                     commandType: CommandType.StoredProcedure
                 );
+
+                // Register recording tracking with BBB internalMeetingID
+                var internalMeetingId = xdoc.Root?.Element("internalMeetingID")?.Value?.Trim();
+                LogBoth($"[MeetingScheduleChecker] 🆔 Extracted internalMeetingID from BBB XML: '{internalMeetingId}'");
+                if (!string.IsNullOrWhiteSpace(internalMeetingId))
+                {
+                    try
+                    {
+                        LogBoth($"[MeetingScheduleChecker] 💾 Calling wms.usp_RegisterWebinarRecording (WebinarId: {meeting.WebinarId}, MeetingId: {meeting.Id}, RecordId: '{internalMeetingId}')...");
+                        await conn.ExecuteAsync(
+                            "wms.usp_RegisterWebinarRecording",
+                            new
+                            {
+                                WebinarId = meeting.WebinarId,
+                                MeetingId = meeting.Id,
+                                MeetingIDString = meeting.MeetingID,
+                                RecordId = internalMeetingId
+                            },
+                            commandType: CommandType.StoredProcedure
+                        );
+                        LogBoth($"[MeetingScheduleChecker] 📹 Registered recording tracking for MeetingID '{meeting.MeetingID}', RecordId: '{internalMeetingId}'.");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogWarnBoth($"[MeetingScheduleChecker] ⚠️ Could not register recording tracking for '{meeting.MeetingID}': {ex.Message}");
+                    }
+                }
 
                 LogBoth($"[MeetingScheduleChecker] ✅ Meeting '{meeting.Name}' (MeetingID: {meeting.MeetingID}) CREATED SUCCESSFULLY on BBB!");
                 LogBoth($"[MeetingScheduleChecker] 🔗 Generated Moderator Join URL: {moderatorJoinUrl}");
@@ -477,6 +511,66 @@ public class MeetingScheduleChecker : BackgroundService
         catch (Exception ex)
         {
             LogWarnBoth($"[MeetingScheduleChecker] Non-fatal error updating Google Calendar for Webinar {webinarId}: {ex.Message}");
+        }
+    }
+
+    private async Task SweepAndEndExpiredMeetingsAsync(SqlConnection conn, CancellationToken stoppingToken)
+    {
+        try
+        {
+            var expiredMeetings = (await conn.QueryAsync<dynamic>(
+                "wms.usp_GetExpiredActiveMeetings",
+                new { GracePeriodMinutes = _gracePeriodInMinutes },
+                commandType: CommandType.StoredProcedure
+            )).ToList();
+
+            if (expiredMeetings.Count == 0) return;
+
+            LogBoth($"[MeetingScheduleChecker] 🏁 Found {expiredMeetings.Count} expired active meeting(s) to auto-terminate on BBB.");
+
+            var baseApi = _createMeetingApi.EndsWith("/create", StringComparison.OrdinalIgnoreCase)
+                ? _createMeetingApi[..^"/create".Length]
+                : _createMeetingApi;
+
+            var endMeetingApi = $"{baseApi}/end";
+
+            foreach (var m in expiredMeetings)
+            {
+                if (stoppingToken.IsCancellationRequested) break;
+
+                string meetingId = (string)m.MeetingID;
+                string modPw = (string?)(m.ModeratorPW) ?? "mp";
+                long webinarId = (long)m.WebinarId;
+
+                try
+                {
+                    var query = $"meetingID={Uri.EscapeDataString(meetingId)}&password={Uri.EscapeDataString(modPw)}";
+                    var dataToHash = "end" + query + _sharedSecret;
+
+                    using var sha1 = SHA1.Create();
+                    var checksum = Convert.ToHexString(sha1.ComputeHash(Encoding.UTF8.GetBytes(dataToHash))).ToLowerInvariant();
+                    var fullUrl = $"{endMeetingApi}?{query}&checksum={checksum}";
+
+                    var httpClient = _httpClientFactory.CreateClient("BbbClient");
+                    httpClient.Timeout = TimeSpan.FromSeconds(15);
+
+                    var response = await httpClient.GetAsync(fullUrl, stoppingToken);
+                    LogBoth($"[MeetingScheduleChecker] 🛑 Sent /api/end for '{meetingId}' (Webinar {webinarId}). BBB HTTP {response.StatusCode}.");
+
+                    // Trigger meeting ended handler to record attendance, mark IsCompleted = 1, and set recording Status = 'PROCESSING'
+                    using var scope = _scopeFactory.CreateScope();
+                    var meetingService = scope.ServiceProvider.GetRequiredService<IMeetingService>();
+                    await meetingService.ProcessMeetingEndedAsync(meetingId, null);
+                }
+                catch (Exception ex)
+                {
+                    LogWarnBoth($"[MeetingScheduleChecker] ⚠️ Error auto-terminating expired meeting '{meetingId}': {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogWarnBoth($"[MeetingScheduleChecker] ⚠️ Error in SweepAndEndExpiredMeetingsAsync: {ex.Message}");
         }
     }
 }

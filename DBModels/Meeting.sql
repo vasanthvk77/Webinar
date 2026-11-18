@@ -924,3 +924,409 @@ BEGIN
 END
 GO
 
+
+
+-- ============================================================
+-- TABLE: wms.WebinarRecordings
+-- Tracks BBB recordings from creation to local storage and transcription
+-- ============================================================
+IF NOT EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'WebinarRecordings' AND s.name = 'wms')
+BEGIN
+    CREATE TABLE wms.WebinarRecordings
+    (
+        Id                  BIGINT IDENTITY(1,1) NOT NULL
+            CONSTRAINT PK_WebinarRecordings PRIMARY KEY,
+        WebinarId           BIGINT NOT NULL
+            CONSTRAINT FK_WebinarRecordings_Webinars
+                FOREIGN KEY REFERENCES wms.Webinars(Id) ON DELETE CASCADE,
+        MeetingId           BIGINT NULL
+            CONSTRAINT FK_WebinarRecordings_Meetings
+                FOREIGN KEY REFERENCES wms.Meetings(Id),
+        MeetingIDString     VARCHAR(50) NOT NULL,
+        RecordId            VARCHAR(150) NOT NULL,
+        Status              VARCHAR(30) NOT NULL
+            CONSTRAINT DF_WebinarRecordings_Status DEFAULT 'WAITING_FOR_END', -- 'WAITING_FOR_END', 'PROCESSING', 'DOWNLOADED', 'NO_RECORDING', 'FAILED'
+        RecordingUrl        NVARCHAR(2000) NULL,
+        LocalFilePath       NVARCHAR(1000) NULL,
+        FileSize            BIGINT NULL,
+        DownloadedAt        DATETIME2(0) NULL,
+        TranscriptStatus    VARCHAR(30) NOT NULL
+            CONSTRAINT DF_WebinarRecordings_TranscriptStatus DEFAULT 'PENDING', -- 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'
+        CreatedAt           DATETIME2(0) NOT NULL
+            CONSTRAINT DF_WebinarRecordings_CreatedAt DEFAULT SYSUTCDATETIME(),
+        UpdatedAt           DATETIME2(0) NULL
+    );
+
+    CREATE UNIQUE INDEX UQ_WebinarRecordings_RecordId ON wms.WebinarRecordings(RecordId);
+    CREATE INDEX IX_WebinarRecordings_Status ON wms.WebinarRecordings(Status);
+    CREATE INDEX IX_WebinarRecordings_WebinarId ON wms.WebinarRecordings(WebinarId);
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_RegisterWebinarRecording
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_RegisterWebinarRecording' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_RegisterWebinarRecording;
+GO
+
+CREATE PROCEDURE wms.usp_RegisterWebinarRecording
+    @WebinarId       BIGINT,
+    @MeetingId       BIGINT,
+    @MeetingIDString VARCHAR(50),
+    @RecordId        VARCHAR(150)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM wms.WebinarRecordings WHERE RecordId = @RecordId)
+    BEGIN
+        INSERT INTO wms.WebinarRecordings
+            (WebinarId, MeetingId, MeetingIDString, RecordId, Status, TranscriptStatus, CreatedAt)
+        VALUES
+            (@WebinarId, @MeetingId, @MeetingIDString, @RecordId, 'WAITING_FOR_END', 'PENDING', SYSUTCDATETIME());
+    END
+    ELSE
+    BEGIN
+        UPDATE wms.WebinarRecordings
+        SET MeetingId = @MeetingId,
+            MeetingIDString = @MeetingIDString,
+            WebinarId = @WebinarId,
+            UpdatedAt = SYSUTCDATETIME()
+        WHERE RecordId = @RecordId;
+    END
+
+    SELECT 1 AS Success;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_MarkRecordingProcessing
+-- Called when meeting ends (via webhook or sweeper)
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_MarkRecordingProcessing' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_MarkRecordingProcessing;
+GO
+
+CREATE PROCEDURE wms.usp_MarkRecordingProcessing
+    @MeetingIDString VARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.WebinarRecordings
+    SET Status = 'PROCESSING',
+        UpdatedAt = SYSUTCDATETIME()
+    WHERE MeetingIDString = @MeetingIDString
+      AND Status = 'WAITING_FOR_END';
+
+    SELECT @@ROWCOUNT AS UpdatedCount;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetPendingRecordings
+-- Selects recordings waiting to be published by BBB and downloaded
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetPendingRecordings' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetPendingRecordings;
+GO
+
+CREATE PROCEDURE wms.usp_GetPendingRecordings
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        Id,
+        WebinarId,
+        MeetingId,
+        MeetingIDString,
+        RecordId,
+        Status,
+        CreatedAt
+    FROM wms.WebinarRecordings
+    WHERE Status IN ('PROCESSING', 'WAITING_FOR_END')
+      AND CreatedAt > DATEADD(HOUR, -24, SYSUTCDATETIME());
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_MarkRecordingDownloaded
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_MarkRecordingDownloaded' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_MarkRecordingDownloaded;
+GO
+
+CREATE PROCEDURE wms.usp_MarkRecordingDownloaded
+    @RecordId      VARCHAR(150),
+    @LocalFilePath NVARCHAR(1000),
+    @RecordingUrl  NVARCHAR(2000) = NULL,
+    @FileSize      BIGINT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.WebinarRecordings
+    SET Status = 'DOWNLOADED',
+        LocalFilePath = @LocalFilePath,
+        RecordingUrl = @RecordingUrl,
+        FileSize = @FileSize,
+        DownloadedAt = SYSUTCDATETIME(),
+        UpdatedAt = SYSUTCDATETIME()
+    WHERE RecordId = @RecordId;
+
+    SELECT @@ROWCOUNT AS UpdatedCount;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_MarkRecordingStatus
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_MarkRecordingStatus' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_MarkRecordingStatus;
+GO
+
+CREATE PROCEDURE wms.usp_MarkRecordingStatus
+    @RecordId VARCHAR(150),
+    @Status   VARCHAR(30)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.WebinarRecordings
+    SET Status = @Status,
+        UpdatedAt = SYSUTCDATETIME()
+    WHERE RecordId = @RecordId;
+
+    SELECT @@ROWCOUNT AS UpdatedCount;
+END
+GO
+
+
+-- ============================================================
+-- SP: wms.usp_GetExpiredActiveMeetings
+-- Purpose: Returns meetings where Webinar EndTime + GracePeriod <= UTC Now
+--          and webinar is still marked IsCompleted = 0
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetExpiredActiveMeetings' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetExpiredActiveMeetings;
+GO
+
+CREATE PROCEDURE wms.usp_GetExpiredActiveMeetings
+    @GracePeriodMinutes INT = 5
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @NowUtc DATETIME2(0) = SYSUTCDATETIME();
+
+    SELECT 
+        m.Id,
+        m.WebinarId,
+        m.MeetingID,
+        m.Name,
+        m.ModeratorPW,
+        w.EndTime,
+        m.IsMeetingCreated
+    FROM wms.Meetings m
+    JOIN wms.Webinars w ON w.Id = m.WebinarId
+    WHERE m.IsMeetingCreated = 1
+      AND w.IsCompleted = 0
+      AND DATEADD(MINUTE, @GracePeriodMinutes, w.EndTime) <= @NowUtc;
+END
+GO
+
+
+-- ============================================================
+-- SP: wms.usp_MarkWebinarCompleted
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_MarkWebinarCompleted' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_MarkWebinarCompleted;
+GO
+
+CREATE PROCEDURE wms.usp_MarkWebinarCompleted
+    @WebinarId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.Webinars
+    SET IsCompleted = 1,
+        UpdatedAt = SYSUTCDATETIME()
+    WHERE Id = @WebinarId
+      AND IsCompleted = 0;
+
+    SELECT @@ROWCOUNT AS UpdatedCount;
+END
+GO
+
+
+-- ============================================================
+-- Migration: Ensure IsTranscribed & TranscriptFilePath columns
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'WebinarRecordings' AND s.name = 'wms')
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('wms.WebinarRecordings') AND name = 'IsTranscribed')
+    BEGIN
+        ALTER TABLE wms.WebinarRecordings ADD IsTranscribed BIT NOT NULL CONSTRAINT DF_WebinarRecordings_IsTranscribed DEFAULT 0;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('wms.WebinarRecordings') AND name = 'TranscriptFilePath')
+    BEGIN
+        ALTER TABLE wms.WebinarRecordings ADD TranscriptFilePath NVARCHAR(1000) NULL;
+    END
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetPendingTranscriptions
+-- Purpose: Returns downloaded recordings that are not yet transcribed
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetPendingTranscriptions' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetPendingTranscriptions;
+GO
+
+CREATE PROCEDURE wms.usp_GetPendingTranscriptions
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        Id,
+        WebinarId,
+        MeetingId,
+        MeetingIDString,
+        RecordId,
+        LocalFilePath,
+        Status,
+        TranscriptStatus,
+        IsTranscribed,
+        CreatedAt
+    FROM wms.WebinarRecordings
+    WHERE Status = 'DOWNLOADED'
+      AND IsTranscribed = 0
+      AND (TranscriptStatus = 'NOT_STARTED' OR TranscriptStatus = 'PENDING')
+      AND LocalFilePath IS NOT NULL
+      AND CreatedAt > DATEADD(HOUR, -24, SYSUTCDATETIME());
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_MarkRecordingTranscriptStatus
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_MarkRecordingTranscriptStatus' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_MarkRecordingTranscriptStatus;
+GO
+
+CREATE PROCEDURE wms.usp_MarkRecordingTranscriptStatus
+    @RecordId VARCHAR(150),
+    @TranscriptStatus VARCHAR(30)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.WebinarRecordings
+    SET TranscriptStatus = @TranscriptStatus,
+        UpdatedAt = SYSUTCDATETIME()
+    WHERE RecordId = @RecordId;
+
+    SELECT @@ROWCOUNT AS UpdatedCount;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_MarkRecordingTranscribed
+-- Purpose: Completes transcription, sets IsTranscribed=1, cleans video path
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_MarkRecordingTranscribed' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_MarkRecordingTranscribed;
+GO
+
+CREATE PROCEDURE wms.usp_MarkRecordingTranscribed
+    @RecordId VARCHAR(150),
+    @TranscriptPath NVARCHAR(1000)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.WebinarRecordings
+    SET IsTranscribed = 1,
+        TranscriptStatus = 'COMPLETED',
+        TranscriptFilePath = @TranscriptPath,
+        LocalFilePath = NULL, -- Video deleted to reclaim disk space
+        UpdatedAt = SYSUTCDATETIME()
+    WHERE RecordId = @RecordId;
+
+    SELECT @@ROWCOUNT AS UpdatedCount;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetWebinarTranscript
+-- Purpose: Retrieves transcript data for student/admin viewing
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetWebinarTranscript' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetWebinarTranscript;
+GO
+
+CREATE PROCEDURE wms.usp_GetWebinarTranscript
+    @WebinarId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP 1
+        wr.Id,
+        wr.WebinarId,
+        w.WebinarName,
+        wr.RecordId,
+        wr.IsTranscribed,
+        wr.TranscriptStatus,
+        wr.TranscriptFilePath,
+        wr.UpdatedAt
+    FROM wms.WebinarRecordings wr
+    JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    WHERE wr.WebinarId = @WebinarId
+      AND wr.IsTranscribed = 1
+    ORDER BY wr.Id DESC;
+END
+GO
+
+-- ============================================================
+-- SP: wms.usp_GetCompletedTranscripts
+-- Purpose: Retrieves all transcribed webinars where TranscriptStatus = 'COMPLETED' AND IsTranscribed = 1
+-- ============================================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetCompletedTranscripts' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_GetCompletedTranscripts;
+GO
+
+CREATE PROCEDURE wms.usp_GetCompletedTranscripts
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        wr.Id,
+        wr.WebinarId,
+        w.WebinarName,
+        w.WebinarDate,
+        w.StartTime,
+        w.EndTime,
+        w.DurationMinutes,
+        w.ConductorName,
+        c.CategoryName,
+        wr.RecordId,
+        wr.TranscriptStatus,
+        wr.IsTranscribed,
+        wr.TranscriptFilePath,
+        wr.CreatedAt,
+        wr.UpdatedAt
+    FROM wms.WebinarRecordings wr
+    INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+    WHERE wr.TranscriptStatus = 'COMPLETED'
+      AND wr.IsTranscribed = 1
+    ORDER BY wr.CreatedAt DESC;
+END
+GO

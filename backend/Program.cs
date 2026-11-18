@@ -128,6 +128,7 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IStudentProfileService, StudentProfileService>();
 builder.Services.Configure<WebinarApi.Models.GoogleCalendarOptions>(builder.Configuration.GetSection("GoogleCalendar"));
 builder.Services.AddScoped<IGoogleCalendarService, GoogleCalendarService>();
+builder.Services.AddScoped<ITranscriptionService,  TranscriptionService>();
 builder.Services.AddHttpClient();
 
 builder.Services.AddSignalR();
@@ -138,6 +139,7 @@ builder.Services.AddHttpClient("BbbClient")
     });
 builder.Services.AddHostedService<EmailQueueBackgroundService>();
 builder.Services.AddHostedService<MeetingScheduleChecker>();
+builder.Services.AddHostedService<RecordingSyncService>();
 
 // -------------------------------------------------------
 // 4. Swagger (Swashbuckle)

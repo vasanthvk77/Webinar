@@ -429,5 +429,18 @@ export const calendarService = {
     api.get('/api/calendar/auth-url', { params: { webinarId } }),
 };
 
+// -------------------------------------------------------
+// Recordings & Transcripts
+// -------------------------------------------------------
+export const recordingService = {
+  // GET /api/recordings
+  getAll: () =>
+    api.get('/api/recordings'),
+
+  // GET /api/recordings/:webinarId/transcript
+  getTranscript: (webinarId) =>
+    api.get(`/api/recordings/${webinarId}/transcript`),
+};
+
 export default api;
 

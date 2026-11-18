@@ -1360,6 +1360,21 @@ BEGIN
 END
 GO
 
+-- Migration: Ensure WebinarRecordings table and IsTranscribed column exist before referencing
+IF EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'WebinarRecordings' AND s.name = 'wms')
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('wms.WebinarRecordings') AND name = 'IsTranscribed')
+    BEGIN
+        ALTER TABLE wms.WebinarRecordings ADD IsTranscribed BIT NOT NULL CONSTRAINT DF_WebinarRecordings_IsTranscribed DEFAULT 0;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('wms.WebinarRecordings') AND name = 'TranscriptFilePath')
+    BEGIN
+        ALTER TABLE wms.WebinarRecordings ADD TranscriptFilePath NVARCHAR(1000) NULL;
+    END
+END
+GO
+
 -- ============================================================
 -- SP: wms.certificateEligibilityCheck
 -- Evaluates the 3 Conditions:
@@ -1436,7 +1451,8 @@ BEGIN
         u.FirstName + ISNULL(' ' + u.LastName, '') AS ParticipantName,
         u.[Year],
         u.Department,
-        COALESCE(wc.CertificateCode, 'PDX-WB-' + CAST(w.Id AS NVARCHAR(20)) + '-' + CAST(u.Id AS NVARCHAR(20))) AS CertificateId
+        COALESCE(wc.CertificateCode, 'PDX-WB-' + CAST(w.Id AS NVARCHAR(20)) + '-' + CAST(u.Id AS NVARCHAR(20))) AS CertificateId,
+        ISNULL(rec.IsTranscribed, 0) AS IsTranscribed
 
     FROM wms.WebinarCompleted wc
     INNER JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId
@@ -1445,6 +1461,7 @@ BEGIN
     LEFT JOIN wms.CertificateTemplates ct ON ct.Id = w.CertificateTempId
     INNER JOIN wms.Users u ON u.Id = wr.UserId
     LEFT JOIN wms.WebinarPayments wp ON wp.WebinarId = w.Id AND wp.CountryCode = u.CountryCode
+    LEFT JOIN wms.WebinarRecordings rec ON rec.WebinarId = w.Id AND rec.IsTranscribed = 1
     WHERE wr.UserId = @UserId
       AND wc.IsAttended = 1 -- Condition 2: Completed webinar
       AND (@WebinarId IS NULL OR w.Id = @WebinarId)

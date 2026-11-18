@@ -44,7 +44,7 @@ const adminTabs = [
   { label: 'Registrations', route: '/admin/registrations', icon: AppRegistrationIcon },
   { label: 'Payments',      route: '/admin/payments',      icon: PaymentIcon },
   { label: 'Participants',  route: '/admin/participants',  icon: PeopleIcon },
-  { label: 'Recordings',    route: '/admin/recordings',    icon: VideoLibraryIcon },
+  { label: 'Meeting Transcribe', route: '/admin/recordings',   icon: VideoLibraryIcon },
   { label: 'Admin Accounts',route: '/admin/accounts',      icon: ManageAccountsIcon },
 
   // Access Control: Super Admin only

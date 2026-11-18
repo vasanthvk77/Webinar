@@ -18,7 +18,7 @@ const studentTabs = [
   { label: 'My Profile',          route: '/dashboard/profile',         icon: PersonIcon },
   { label: 'Webinars',            route: '/dashboard/webinars',        icon: EventIcon },
   { label: 'My Certificates',     route: '/dashboard/certificates',    icon: WorkspacePremiumIcon },
-  { label: 'Webinar Recordings',  route: '/dashboard/recordings',      icon: VideoLibraryIcon },
+  { label: 'Meeting Transcribe',  route: '/dashboard/recordings',      icon: VideoLibraryIcon },
   { label: 'Payments',            route: '/dashboard/payments',        icon: PaymentIcon },
   { label: 'Notifications',       route: '/dashboard/notifications',   icon: NotificationsIcon },
 ];

@@ -268,6 +268,7 @@ export default function CompletedWebinars() {
                     primaryDisabled={!isEligible || isDownloading}
                     primaryLoading={isDownloading}
                     onPrimaryClick={isEligible ? () => handleDownloadCertificate(w) : undefined}
+                    secondaryLabel="Details"
                   />
                 </Grid>
               );

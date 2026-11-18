@@ -51,6 +51,7 @@ public class MeetingService : IMeetingService
     {
         _logger.LogInformation("[MeetingService] ScheduleMeeting called for WebinarId: {WebinarId}, MeetingID: {MeetingID}, UserId: {UserId}",
             request.WebinarId, request.MeetingID, userId);
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss} SCHEDULE] 🎯 ScheduleMeeting called for WebinarId: {request.WebinarId}, MeetingID: '{request.MeetingID}', UserId: {userId}");
 
         try
         {
@@ -121,8 +122,11 @@ public class MeetingService : IMeetingService
 
             if (savedMeeting == null)
             {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss} SCHEDULE] ❌ wms.usp_ScheduleMeeting returned NULL!");
                 return (false, "Failed to schedule meeting.", null);
             }
+
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} SCHEDULE] 💾 wms.usp_ScheduleMeeting success! Meeting DbId: {savedMeeting.Id}, WebinarId: {savedMeeting.WebinarId}. Calling BBB...");
 
             // Immediately create the BigBlueButton meeting session upon schedule
             var conductorName = (string?)webinar.ConductorName;
@@ -314,9 +318,13 @@ public class MeetingService : IMeetingService
 
             if (!string.IsNullOrWhiteSpace(_serverToServerUrl) && !_serverToServerUrl.Equals("nothing now yet", StringComparison.OrdinalIgnoreCase))
             {
-                parameters.Add(new("meetingEndedURL", _serverToServerUrl));
+                var callbackWithId = _serverToServerUrl.Contains('?')
+                    ? $"{_serverToServerUrl}&meetingID={Uri.EscapeDataString(meetingID)}"
+                    : $"{_serverToServerUrl}?meetingID={Uri.EscapeDataString(meetingID)}";
+
+                parameters.Add(new("meetingEndedURL", callbackWithId));
                 parameters.Add(new("meetingKeepEvents", "true"));
-                parameters.Add(new("meta_analytics-callback-url", _serverToServerUrl));
+                parameters.Add(new("meta_analytics-callback-url", callbackWithId));
             }
 
             var queryString = string.Join("&", parameters.Select(p =>
@@ -330,16 +338,22 @@ public class MeetingService : IMeetingService
             var httpClient = _httpClientFactory.CreateClient("BbbClient");
             httpClient.Timeout = TimeSpan.FromSeconds(30);
 
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] 🌐 Calling BigBlueButton /api/create for MeetingID '{meetingID}' (WebinarId: {webinarId})...");
             var createResponse = await httpClient.GetAsync(createUrl);
             var responseXml = await createResponse.Content.ReadAsStringAsync();
 
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] 📥 BBB Create Response XML:\n{responseXml}");
+
             var xdoc = XDocument.Parse(responseXml);
             var returncode = xdoc.Root?.Element("returncode")?.Value;
+
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] 🔎 Parsed returncode: '{returncode}'");
 
             if (!string.Equals(returncode, "SUCCESS", StringComparison.OrdinalIgnoreCase))
             {
                 var messageKey = xdoc.Root?.Element("messageKey")?.Value;
                 var message = xdoc.Root?.Element("message")?.Value ?? "Failed to create/verify meeting on BigBlueButton.";
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] ❌ BBB Create Failed! Code: {messageKey}, Message: {message}");
                 _logger.LogWarning("[MeetingService] BBB create failed for MeetingID '{MeetingID}': {Code} - {Msg}",
                     meetingID, messageKey, message);
                 return (false, null);
@@ -367,6 +381,7 @@ public class MeetingService : IMeetingService
             var newModeratorJoinUrl = $"{_joinMeetingApi}?{joinQuery}&checksum={joinChecksum}";
 
             var nowUtc = DateTime.UtcNow;
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] 💾 Updating wms.Meetings (IsMeetingCreated = 1, MeetingCreatedAt = {nowUtc:yyyy-MM-dd HH:mm:ss} UTC)...");
             await conn.ExecuteAsync(
                 "wms.usp_MarkMeetingCreated",
                 new { Id = meetingId, MeetingCreatedAt = nowUtc, ModeratorJoinUrl = newModeratorJoinUrl },
@@ -374,11 +389,13 @@ public class MeetingService : IMeetingService
             );
 
             // Synchronize attendee links for this webinar
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] 👥 Synchronizing attendee links for Webinar {webinarId}...");
             await SyncAttendeeLinksInternalAsync(meetingId, webinarId, meetingID, attendeePW, conn);
 
             // Queue personalized meeting join emails
             try
             {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] 📨 Queueing meeting join emails...");
                 await conn.QueryFirstOrDefaultAsync<dynamic>(
                     "wms.sp_QueueAttendeeMeetingJoinEmails",
                     new { MeetingId = meetingId, WebinarId = webinarId },
@@ -387,7 +404,43 @@ public class MeetingService : IMeetingService
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-CREATE] ⚠️ Non-fatal exception queueing emails: {ex.Message}");
                 _logger.LogWarning(ex, "[MeetingService] Non-fatal exception queueing meeting join emails: {Message}", ex.Message);
+            }
+
+            // Register recording tracking with BBB internalMeetingID
+            var internalMeetingId = xdoc.Root?.Element("internalMeetingID")?.Value?.Trim();
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-RECORDING] 🆔 Extracted internalMeetingID from BBB XML: '{internalMeetingId}'");
+
+            if (!string.IsNullOrWhiteSpace(internalMeetingId))
+            {
+                try
+                {
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-RECORDING] 💾 Calling wms.usp_RegisterWebinarRecording (WebinarId: {webinarId}, MeetingId: {meetingId}, MeetingIDString: '{meetingID}', RecordId: '{internalMeetingId}')...");
+                    await conn.ExecuteAsync(
+                        "wms.usp_RegisterWebinarRecording",
+                        new
+                        {
+                            WebinarId = webinarId,
+                            MeetingId = meetingId,
+                            MeetingIDString = meetingID,
+                            RecordId = internalMeetingId
+                        },
+                        commandType: CommandType.StoredProcedure
+                    );
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-RECORDING] ✅ SUCCESS: RecordId '{internalMeetingId}' INSERTED into wms.WebinarRecordings table (Status: WAITING_FOR_END)!");
+                    _logger.LogInformation("[MeetingService] Registered recording tracking for MeetingID '{MeetingID}', RecordId: '{RecordId}'",
+                        meetingID, internalMeetingId);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-RECORDING] ❌ ERROR: Failed executing wms.usp_RegisterWebinarRecording: {ex.Message}");
+                    _logger.LogWarning(ex, "[MeetingService] Could not register recording tracking for '{MeetingID}': {Msg}", meetingID, ex.Message);
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss} BBB-RECORDING] ⚠️ WARNING: internalMeetingID was NULL or EMPTY in BBB create response! Cannot register recording tracking.");
             }
 
             // Sync Google Calendar events with the new join link
@@ -516,6 +569,21 @@ public class MeetingService : IMeetingService
         {
             _logger.LogWarning("[MeetingService] Meeting with MeetingID '{MeetingID}' not found in database.", meetingId);
             return (false, $"Meeting '{meetingId}' not found in database.", 0);
+        }
+
+        // Update recording status to PROCESSING so the sync service polls BBB for the video
+        try
+        {
+            await conn.ExecuteAsync(
+                "wms.usp_MarkRecordingProcessing",
+                new { MeetingIDString = meetingId },
+                commandType: CommandType.StoredProcedure
+            );
+            _logger.LogInformation("[MeetingService] Marked recording as PROCESSING for MeetingID '{MeetingID}'.", meetingId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MeetingService] Could not update recording status to PROCESSING for '{MeetingID}': {Msg}", meetingId, ex.Message);
         }
 
         int defaultDurationSeconds = meeting.Duration > 0 ? (meeting.Duration * 60) : 7200;
@@ -670,6 +738,20 @@ public class MeetingService : IMeetingService
             {
                 _logger.LogError(ex, "[MeetingService] Failed recording attendance for {CustomUserId}: {Msg}", attendee.CustomUserId, ex.Message);
             }
+        }
+
+        // Ensure the Webinar itself is marked as Completed (IsCompleted = 1)
+        try
+        {
+            await conn.ExecuteAsync(
+                "wms.usp_MarkWebinarCompleted",
+                new { WebinarId = meeting.WebinarId },
+                commandType: CommandType.StoredProcedure
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MeetingService] Could not mark Webinar {WebinarId} as completed: {Msg}", meeting.WebinarId, ex.Message);
         }
 
         _logger.LogInformation("[MeetingService] Completed meeting processing for '{MeetingID}'. Recorded {Count} student attendance(s).",

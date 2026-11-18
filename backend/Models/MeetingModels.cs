@@ -142,3 +142,83 @@ public class AttendeeMeetingParamDto
     public string? ExistingJoinLink { get; set; }
     public bool HasLink { get; set; }
 }
+
+// -------------------------------------------------------
+// DTOs for Webinar Recordings Pipeline
+// -------------------------------------------------------
+public class PendingRecordingDto
+{
+    public long Id { get; set; }
+    public long WebinarId { get; set; }
+    public long? MeetingId { get; set; }
+    public string MeetingIDString { get; set; } = string.Empty;
+    public string RecordId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+}
+
+public class WebinarRecordingDto
+{
+    public long Id { get; set; }
+    public long WebinarId { get; set; }
+    public long? MeetingId { get; set; }
+    public string MeetingIDString { get; set; } = string.Empty;
+    public string RecordId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? RecordingUrl { get; set; }
+    public string? LocalFilePath { get; set; }
+    public long? FileSize { get; set; }
+    public DateTime? DownloadedAt { get; set; }
+    public string TranscriptStatus { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    public bool IsTranscribed { get; set; }
+    public string? TranscriptFilePath { get; set; }
+}
+
+public class PendingTranscriptionDto
+{
+    public long Id { get; set; }
+    public long WebinarId { get; set; }
+    public long? MeetingId { get; set; }
+    public string MeetingIDString { get; set; } = string.Empty;
+    public string RecordId { get; set; } = string.Empty;
+    public string? LocalFilePath { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string TranscriptStatus { get; set; } = string.Empty;
+    public bool IsTranscribed { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class WebinarTranscriptResponseDto
+{
+    public long Id { get; set; }
+    public long WebinarId { get; set; }
+    public string WebinarName { get; set; } = string.Empty;
+    public string RecordId { get; set; } = string.Empty;
+    public bool IsTranscribed { get; set; }
+    public string TranscriptStatus { get; set; } = string.Empty;
+    public string? TranscriptFilePath { get; set; }
+    public string? TranscriptContent { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class WebinarRecordingListItemDto
+{
+    public long Id { get; set; }
+    public long WebinarId { get; set; }
+    public string WebinarName { get; set; } = string.Empty;
+    public DateTime WebinarDate { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime EndTime { get; set; }
+    public int DurationMinutes { get; set; }
+    public string ConductorName { get; set; } = string.Empty;
+    public string? CategoryName { get; set; }
+    public string RecordId { get; set; } = string.Empty;
+    public string TranscriptStatus { get; set; } = string.Empty;
+    public bool IsTranscribed { get; set; }
+    public string? TranscriptFilePath { get; set; }
+    public string? TranscriptText { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}

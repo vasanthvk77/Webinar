@@ -216,6 +216,7 @@ public class CompletedWebinarDto
     public string?   CertificateTemplateName { get; set; }
     public string?   TemplateImageUrl        { get; set; }
     public string?   ImageUrl                { get; set; }
+    public bool      IsTranscribed           { get; set; }
 }
 
 // -------------------------------------------------------

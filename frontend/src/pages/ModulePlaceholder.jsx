@@ -10,7 +10,7 @@ const routeLabels = {
   'registered':          'Registered Webinars',
   'completed':           'Completed Webinars',
   'certificates':        'My Certificates',
-  'recordings':          'Webinar Recordings',
+  'recordings':          'Meeting Transcribe',
   'payments':            'Payments',
   'notifications':       'Notifications',
   // Admin

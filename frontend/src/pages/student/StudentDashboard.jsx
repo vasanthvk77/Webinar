@@ -422,8 +422,8 @@ export default function StudentDashboard() {
                     label={latest.isPaid ? `Paid • ${currencySymbol}${Number(latest.price || 0).toLocaleString('en-IN')}` : 'Free Webinar'}
                     size="small"
                     sx={{
-                      bgcolor: latest.isPaid ? '#fee2e2' : '#f0fdf4',
-                      color: latest.isPaid ? '#991b1b' : '#166534',
+                      bgcolor: latest.isPaid ? '#f0fdf4' : '#fee2e2',
+                      color: latest.isPaid ? '#1b9048ff' : '#991b1b',
                       fontWeight: 700,
                       fontSize: '11px',
                       height: 24,
@@ -540,13 +540,13 @@ export default function StudentDashboard() {
                         height: 48,
                         px: 3.5,
                         borderRadius: '12px',
-                        bgcolor: GOLD,
-                        color: '#0F172A',
+                        bgcolor: "#ffedd5",
+                        color: '#ec6721',
                         fontWeight: 800,
                         fontSize: '14px',
                         textTransform: 'none',
-                        boxShadow: `0 8px 20px -4px ${GOLD}80`,
-                        '&:hover': { bgcolor: '#d97706', color: '#fff' }
+                        boxShadow: `0 8px 20px -4px #eaae5eff 80`,
+                        '&:hover': { bgcolor: '#ffd59fff', color: '#f8600eff' }
                       }}
                     >
                       View Certificate
