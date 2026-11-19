@@ -18,19 +18,20 @@ namespace WebinarApi.Services
 {
     public class GoogleCalendarService : IGoogleCalendarService
     {
-        private readonly GoogleCalendarOptions _options;
+        private readonly IOptionsMonitor<GoogleCalendarOptions> _optionsMonitor;
+        private GoogleCalendarOptions _options => _optionsMonitor.CurrentValue;
         private readonly string _connectionString;
         private readonly string _frontendUrl;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<GoogleCalendarService> _logger;
 
         public GoogleCalendarService(
-            IOptions<GoogleCalendarOptions> options,
+            IOptionsMonitor<GoogleCalendarOptions> options,
             IConfiguration configuration,
             IHttpClientFactory httpClientFactory,
             ILogger<GoogleCalendarService> logger)
         {
-            _options = options.Value;
+            _optionsMonitor = options;
             _connectionString = configuration.GetConnectionString("DefaultConnection")
                                 ?? throw new InvalidOperationException("DefaultConnection not found");
 

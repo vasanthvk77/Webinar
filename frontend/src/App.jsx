@@ -26,6 +26,7 @@ import Participants        from './pages/admin/Participants';
 import Payments            from './pages/admin/Payments';
 import Certifications      from './pages/admin/Certifications';
 import TemplateBuilder    from './pages/admin/TemplateBuilder';
+import ReminderConfiguration from './pages/admin/ReminderConfiguration';
 import StudentWebinars    from './pages/student/StudentWebinars';
 import MyCertificates      from './pages/student/MyCertificates';
 import StudentDashboard    from './pages/student/StudentDashboard';
@@ -118,7 +119,6 @@ function AppInner() {
               {/* ── Webinar Management ── */}
               <Route path="dashboard"     element={<AdminDashboard />} />
               <Route path="webinars"      element={<Webinars />} />
-              <Route path="registrations" element={<ModulePlaceholder />} />
               <Route path="payments"      element={<Payments />} />
               <Route path="participants"  element={<Participants />} />
               <Route path="recordings"    element={<WebinarRecordings />} />
@@ -146,8 +146,7 @@ function AppInner() {
               <Route path="certifications"     element={<Certifications />} />
               <Route path="template-builder"   element={<TemplateBuilder />} />
               <Route path="categories"         element={<Categories />} />
-              <Route path="webinar-types"      element={<ModulePlaceholder />} />
-              <Route path="reminders"          element={<ModulePlaceholder />} />
+              <Route path="reminders"          element={<ReminderConfiguration />} />
 
               {/* ── Communication ── */}
               <Route path="notifications"      element={<ModulePlaceholder />} />

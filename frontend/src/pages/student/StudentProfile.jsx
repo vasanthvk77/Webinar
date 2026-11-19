@@ -101,6 +101,8 @@ export default function StudentProfile() {
     countryName: 'India',
     gender: 1, // 1: Male, 2: Female, 3: Others
     profileUrl: '',
+    year: '',
+    department: '',
     roleName: 'Student',
   });
 
@@ -134,6 +136,8 @@ export default function StudentProfile() {
           countryName: resolvedCountryName,
           gender: p.gender === 2 ? 2 : p.gender === 3 ? 3 : 1,
           profileUrl: p.profileUrl || '',
+          year: p.year || '',
+          department: p.department || '',
           roleName: p.roleName || 'Student',
         });
       }
@@ -247,6 +251,8 @@ export default function StudentProfile() {
         countryCode: formData.countryCode.trim(),
         gender: Number(formData.gender),
         profileUrl: formData.profileUrl,
+        year: formData.year?.trim() || null,
+        department: formData.department?.trim() || null,
       };
 
       const res = await studentProfileService.updateProfile(payload);
@@ -265,6 +271,8 @@ export default function StudentProfile() {
             countryName: updatedName,
             gender: updated.gender || prev.gender,
             profileUrl: updated.profileUrl || prev.profileUrl,
+            year: updated.year || '',
+            department: updated.department || '',
           }));
 
           if (updateUser) {
@@ -596,6 +604,28 @@ export default function StudentProfile() {
                   <span>Student ID #{formData.id.toString().padStart(5, '0')}</span>
                   <span>•</span>
                   <span>{formData.countryName || 'Global'}</span>
+                  {formData.department && (
+                    <>
+                      <span>•</span>
+                      <span>{formData.department}</span>
+                    </>
+                  )}
+                  {formData.year && (
+                    <Box
+                      component="span"
+                      sx={{
+                        fontSize: 11.5,
+                        px: 1,
+                        py: 0.2,
+                        borderRadius: '6px',
+                        bgcolor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+                        color: colors.textPrimary,
+                        fontWeight: 650,
+                      }}
+                    >
+                      {formData.year}
+                    </Box>
+                  )}
                   <span>•</span>
                   <span style={{ color: colors.textMuted }}>{formData.email}</span>
                 </Typography>
@@ -974,6 +1004,43 @@ export default function StudentProfile() {
                     );
                   })}
                 </Box>
+              </Box>
+            </Box>
+
+            {/* Row 3 - Academic Information (Department & Year) */}
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                gap: 2.5,
+                width: '100%',
+                alignItems: 'flex-start',
+              }}
+            >
+              {/* Department */}
+              <Box sx={{ width: '100%', minWidth: 0 }}>
+                <Typography sx={labelSx}>Department</Typography>
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={formData.department}
+                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                  placeholder="e.g. Computer Science, Mechanical, Business..."
+                  InputProps={{ sx: inputSx }}
+                />
+              </Box>
+
+              {/* Year */}
+              <Box sx={{ width: '100%', minWidth: 0 }}>
+                <Typography sx={labelSx}>Year of Study</Typography>
+                <TextField
+                  fullWidth
+                  size="small"
+                  value={formData.year}
+                  onChange={(e) => setFormData({ ...formData, year: e.target.value })}
+                  placeholder="e.g. 1st Year, 2nd Year, 3rd Year, 4th Year..."
+                  InputProps={{ sx: inputSx }}
+                />
               </Box>
             </Box>
           </Box>

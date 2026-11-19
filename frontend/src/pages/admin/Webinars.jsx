@@ -23,7 +23,6 @@ import AutorenewIcon       from '@mui/icons-material/Autorenew';
 import CloudUploadIcon     from '@mui/icons-material/CloudUpload';
 import ImageIcon           from '@mui/icons-material/Image';
 import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
-import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
 import toast             from 'react-hot-toast';
 import { webinarService, categoryService, certificateTemplateService, meetingService } from '../../services/api';
 import { useAuth }          from '../../context/AuthContext';
@@ -734,24 +733,18 @@ export default function Webinars() {
               <TableHead>
                 <TableRow sx={{ bgcolor: colors.surfaceAlt }}>
                   <TableCell sx={{ ...headCellSx, width: '3%' }}>#</TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Webinar</TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '12%' }}>Category</TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Date &amp; Time</TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Conductor</TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '6%' }}>
+                  <TableCell sx={{ ...headCellSx, width: '15%' }}>Webinar</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '13%' }}>Category</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '15%' }}>Date &amp; Time</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '14%' }}>Conductor</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '7%' }}>
                     <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
                       <PeopleAltOutlinedIcon sx={{ fontSize: 14, color: colors.textMuted }} />
                       Regs.
                     </Box>
                   </TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '9%' }}>
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                      <PaymentsOutlinedIcon sx={{ fontSize: 14, color: colors.textMuted }} />
-                      Payment
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '6%' }}>Limit</TableCell>
-                  <TableCell sx={{ ...headCellSx, width: '7%' }}>Price</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '7%' }}>Limit</TableCell>
+                  <TableCell sx={{ ...headCellSx, width: '8%' }}>Price</TableCell>
                   <TableCell sx={{ ...headCellSx, width: '13%' }}>Status</TableCell>
                   <TableCell sx={{ ...headCellSx, width: '5%', textAlign: 'center' }}>Action</TableCell>
                 </TableRow>
@@ -836,42 +829,6 @@ export default function Webinars() {
                               px: 0.5,
                               height: 24,
                               minWidth: 32
-                            }}
-                          />
-                        );
-                      })()}
-                    </TableCell>
-
-                    {/* ── Collected Payment (count * amount) Badge ── */}
-                    <TableCell sx={bodyCellSx}>
-                      {(() => {
-                        const regCount = w.registrationCount || 0;
-                        const price = w.isPaid ? (w.price || 0) : 0;
-                        const collectedPayment = Math.round(regCount * price);
-                        const hasRevenue = collectedPayment > 0;
-                        return (
-                          <Chip
-                            icon={
-                              <PaymentsOutlinedIcon
-                                sx={{
-                                  fontSize: '14px !important',
-                                  color: hasRevenue ? '#b45309 !important' : `${colors.textMuted} !important`
-                                }}
-                              />
-                            }
-                            label={`₹${collectedPayment.toLocaleString('en-IN')}`}
-                            size="small"
-                            sx={{
-                              bgcolor: hasRevenue ? 'rgba(234, 179, 8, 0.14)' : colors.surfaceAlt,
-                              color: hasRevenue ? '#b45309' : colors.textMuted,
-                              border: hasRevenue ? '1px solid rgba(234, 179, 8, 0.35)' : `1px solid ${colors.border}`,
-                              fontWeight: 700,
-                              fontSize: '12px',
-                              borderRadius: '999px',
-                              px: 0.6,
-                              height: 24,
-                              maxWidth: '100%',
-                              '& .MuiChip-icon': { ml: 0.5, mr: -0.2 }
                             }}
                           />
                         );

@@ -16,7 +16,6 @@
 
 import DashboardIcon         from '@mui/icons-material/Dashboard';
 import VideoCallIcon          from '@mui/icons-material/VideoCall';
-import AppRegistrationIcon    from '@mui/icons-material/AppRegistration';
 import PaymentIcon            from '@mui/icons-material/Payment';
 import PeopleIcon             from '@mui/icons-material/People';
 import VideoLibraryIcon       from '@mui/icons-material/VideoLibrary';
@@ -25,7 +24,6 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CardMembershipIcon     from '@mui/icons-material/CardMembership';
 import DesignServicesIcon    from '@mui/icons-material/DesignServices';
 import CategoryIcon           from '@mui/icons-material/Category';
-import TypeSpecimenIcon       from '@mui/icons-material/TypeSpecimen';
 import AlarmIcon              from '@mui/icons-material/Alarm';
 import NotificationsIcon      from '@mui/icons-material/Notifications';
 import EmailIcon              from '@mui/icons-material/Email';
@@ -41,10 +39,9 @@ const adminTabs = [
 
   // ── Permission-controlled tabs ────────────────────────────────
   { label: 'Webinars',      route: '/admin/webinars',      icon: VideoCallIcon },
-  { label: 'Registrations', route: '/admin/registrations', icon: AppRegistrationIcon },
   { label: 'Payments',      route: '/admin/payments',      icon: PaymentIcon },
   { label: 'Participants',  route: '/admin/participants',  icon: PeopleIcon },
-  { label: 'Meeting Transcribe', route: '/admin/recordings',   icon: VideoLibraryIcon },
+  { label: 'Meeting Transcript', route: '/admin/recordings',   icon: VideoLibraryIcon },
   { label: 'Admin Accounts',route: '/admin/accounts',      icon: ManageAccountsIcon },
 
   // Access Control: Super Admin only
@@ -72,7 +69,6 @@ const adminTabs = [
       { label: 'Template Builder',       route: '/admin/template-builder', icon: DesignServicesIcon },
       { label: 'Certificate Template',   route: '/admin/certifications',   icon: CardMembershipIcon },
       { label: 'Categories',             route: '/admin/categories',     icon: CategoryIcon },
-      { label: 'Webinar Types',          route: '/admin/webinar-types',  icon: TypeSpecimenIcon },
       { label: 'Reminder Configuration', route: '/admin/reminders',      icon: AlarmIcon },
     ],
   },

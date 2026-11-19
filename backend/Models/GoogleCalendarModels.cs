@@ -13,6 +13,14 @@ namespace WebinarApi.Models
         public List<int> ReminderOffsetsInMinutes { get; set; } = new();
     }
 
+    public class UpdateReminderOffsetsRequest
+    {
+        public List<int>? Offsets { get; set; }
+        public int? Offset1 { get; set; }
+        public int? Offset2 { get; set; }
+        public int? Offset3 { get; set; }
+    }
+
     public class AddCalendarEventRequest
     {
         public long WebinarId { get; set; }

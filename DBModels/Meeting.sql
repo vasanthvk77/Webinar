@@ -1114,7 +1114,7 @@ IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.
 GO
 
 CREATE PROCEDURE wms.usp_GetExpiredActiveMeetings
-    @GracePeriodMinutes INT = 5
+    @GracePeriodMinutes INT = 30
 AS
 BEGIN
     SET NOCOUNT ON;

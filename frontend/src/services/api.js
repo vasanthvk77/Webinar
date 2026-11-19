@@ -442,5 +442,18 @@ export const recordingService = {
     api.get(`/api/recordings/${webinarId}/transcript`),
 };
 
+// -------------------------------------------------------
+// Reminder Configuration (Admin)
+// -------------------------------------------------------
+export const reminderService = {
+  // GET /api/reminders
+  getOffsets: () =>
+    api.get('/api/reminders'),
+
+  // PUT /api/reminders
+  updateOffsets: (data) =>
+    api.put('/api/reminders', data),
+};
+
 export default api;
 

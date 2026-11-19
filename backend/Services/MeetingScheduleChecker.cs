@@ -27,6 +27,7 @@ public class MeetingScheduleChecker : BackgroundService
     private readonly string _serverToServerUrl;
     private readonly int _intervalInMinutes;
     private readonly int _gracePeriodInMinutes;
+    private readonly int _meetingEndCheckGracePeriod;
     private readonly int _adminAlertBufferMinutes;
 
     public MeetingScheduleChecker(
@@ -54,6 +55,7 @@ public class MeetingScheduleChecker : BackgroundService
 
         _intervalInMinutes = config.GetValue<int>("MeetingScheduleChecker:IntervalInMinutes", 2);
         _gracePeriodInMinutes = config.GetValue<int>("MeetingScheduleChecker:GracePeriodInMinutes", 5);
+        _meetingEndCheckGracePeriod = config.GetValue<int>("MeetingScheduleChecker:MeetingEndCheckGracePeriod", 30);
         _adminAlertBufferMinutes = config.GetValue<int>("MeetingScheduleChecker:AdminAlertBufferMinutesBeforeStart", 30);
     }
 
@@ -71,7 +73,7 @@ public class MeetingScheduleChecker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        LogBoth($"[MeetingScheduleChecker] 🚀 Worker started. Poll Interval: {_intervalInMinutes} min(s), Grace Period: {_gracePeriodInMinutes} min(s).");
+        LogBoth($"[MeetingScheduleChecker] 🚀 Worker started. Poll Interval: {_intervalInMinutes} min(s), End Check Grace Period: {_meetingEndCheckGracePeriod} min(s).");
 
         // Small initial wait to allow database initialization to complete
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
@@ -520,7 +522,7 @@ public class MeetingScheduleChecker : BackgroundService
         {
             var expiredMeetings = (await conn.QueryAsync<dynamic>(
                 "wms.usp_GetExpiredActiveMeetings",
-                new { GracePeriodMinutes = _gracePeriodInMinutes },
+                new { GracePeriodMinutes = _meetingEndCheckGracePeriod },
                 commandType: CommandType.StoredProcedure
             )).ToList();
 

@@ -404,8 +404,8 @@ BEGIN
         CountryCode  = @CountryCode,
         Gender       = @Gender,
         ProfileUrl   = COALESCE(@ProfileUrl, ProfileUrl),
-        [Year]       = COALESCE(@Year, [Year]),
-        Department   = COALESCE(@Department, Department),
+        [Year]       = @Year,
+        Department   = @Department,
         UpdatedAt    = GETUTCDATE()
     WHERE Id = @UserId;
 
@@ -650,8 +650,8 @@ BEGIN
         CountryCode  = @CountryCode,
         Gender       = @Gender,
         ProfileUrl   = COALESCE(@ProfileUrl, ProfileUrl),
-        [Year]       = COALESCE(@Year, [Year]),
-        Department   = COALESCE(@Department, Department),
+        [Year]       = @Year,
+        Department   = @Department,
         UpdatedAt    = GETUTCDATE()
     WHERE Id = @UserId;
 

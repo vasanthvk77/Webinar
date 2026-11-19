@@ -111,31 +111,29 @@ INSERT INTO wms.Tabs (TabName, Route, DisplayOrder, RoleId) VALUES
 ('My Profile',          '/dashboard/profile',       2,  3),
 ('Webinars',            '/dashboard/webinars',      3,  3),
 ('My Certificates',     '/dashboard/certificates',  4,  3),
-('Webinar Recordings',  '/dashboard/recordings',    5,  3),
+('Meeting Transcribe',  '/dashboard/recordings',    5,  3),
 ('Payments',            '/dashboard/payments',      6,  3),
 ('Notifications',       '/dashboard/notifications', 7,  3);
 
 -- Admin tabs — permission-controlled (no Dashboard, no removed modules)
 INSERT INTO wms.Tabs (TabName, Route, DisplayOrder, RoleId) VALUES
 ('Webinars',              '/admin/webinars',           11, 2),
-('Registrations',         '/admin/registrations',      12, 2),
 ('Payments',              '/admin/payments',            13, 2),
 ('Participants',          '/admin/participants',        14, 2),
-('Recordings',            '/admin/recordings',          16, 2),
+('Meeting Transcribe',    '/admin/recordings',          16, 2),
 ('Admin Accounts',        '/admin/accounts',            20, 2),
 -- Access Control: Super Admin only — excluded from RoleTabAccess seed
 ('Access Control',        '/admin/access',              22, 2),
 ('Template Builder',      '/admin/template-builder',    29, 2),
 ('Certifications',        '/admin/certifications',      30, 2),
 ('Categories',            '/admin/categories',          31, 2),
-('Webinar Types',         '/admin/webinar-types',       32, 2),
 ('Reminder Configuration','/admin/reminders',           33, 2),
 ('Notifications',         '/admin/notifications',       40, 2),
 ('Email Templates',       '/admin/email-templates',     41, 2),
 ('SMS Templates',         '/admin/sms-templates',       42, 2),
 ('WhatsApp Templates',    '/admin/whatsapp-templates',  43, 2);
 
-PRINT '[SUCCESS] wms.Tabs seeded — 9 student tabs, 15 admin tabs';
+PRINT '[SUCCESS] wms.Tabs seeded — 7 student tabs, 14 admin tabs';
 GO
 
 -- =============================================

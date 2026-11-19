@@ -408,7 +408,7 @@ export default function MeetingTranscribe() {
             component="h2"
             sx={{ fontSize: { xs: '1.6rem', md: '2rem' }, fontWeight: 800, letterSpacing: '-0.6px', color: colors.textPrimary, lineHeight: 1.2 }}
           >
-            Meeting Transcribe
+            Meeting Transcript
           </Typography>
           <Typography sx={{ mt: 0.5, color: colors.textSecondary, fontSize: '0.95rem' }}>
             Browse every transcript, copy the text, or download it as a .txt file.
