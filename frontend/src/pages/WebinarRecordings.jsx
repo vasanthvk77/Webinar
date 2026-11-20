@@ -32,6 +32,73 @@ import { formatUtcToLocalDateOnly } from '../utils/validation';
 
 const countWords = (text) => (text ? text.trim().split(/\s+/).filter(Boolean).length : 0);
 
+const getStatusInfo = (item) => {
+  const status = (item.transcriptStatus || '').toUpperCase();
+  const isCompleted = item.isTranscribed || status === 'COMPLETED';
+  const isProcessing = status === 'PROCESSING' || status === 'IN_PROGRESS' || status === 'DOWNLOADED';
+
+  // Compare webinar start time with current time
+  const isStarted = item.startTime ? new Date(item.startTime) <= new Date() : false;
+
+  if (isCompleted) {
+    return {
+      type: 'COMPLETED',
+      label: 'Transcribed',
+      chipBg: '#DCFCE7',
+      chipColor: '#166534',
+      chipBorder: '#86EFAC',
+      icon: <CheckCircleIcon sx={{ fontSize: '16px !important', color: '#16A34A !important' }} />,
+    };
+  }
+
+  if (isProcessing) {
+    return {
+      type: 'PROCESSING',
+      label: 'transcription is under processing',
+      chipBg: '#E0F2FE',
+      chipColor: '#0369A1',
+      chipBorder: '#7DD3FC',
+      icon: <CircularProgress size={13} thickness={5} sx={{ color: '#0284C7' }} />,
+    };
+  }
+
+  if (isStarted) {
+    return {
+      type: 'GOING',
+      label: 'Webinar is going',
+      chipBg: '#FEF3C7',
+      chipColor: '#B45309',
+      chipBorder: '#FCD34D',
+      icon: (
+        <Box
+          sx={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            bgcolor: '#D97706',
+            boxShadow: '0 0 0 3px rgba(245, 158, 11, 0.35)',
+            animation: 'pulseDot 1.8s infinite',
+            '@keyframes pulseDot': {
+              '0%': { transform: 'scale(0.95)', opacity: 0.8 },
+              '50%': { transform: 'scale(1.2)', opacity: 1 },
+              '100%': { transform: 'scale(0.95)', opacity: 0.8 },
+            },
+          }}
+        />
+      ),
+    };
+  }
+
+  return {
+    type: 'SCHEDULED',
+    label: 'Scheduled',
+    chipBg: '#F1F5F9',
+    chipColor: '#475569',
+    chipBorder: '#CBD5E1',
+    icon: <CalendarMonthIcon sx={{ fontSize: '15px !important', color: '#64748B !important' }} />,
+  };
+};
+
 export default function MeetingTranscribe() {
   const colors = useThemeColors();
   const { isDark } = useAppTheme();
@@ -97,8 +164,9 @@ export default function MeetingTranscribe() {
 
   // Summary numbers for the stat tiles
   const stats = useMemo(() => {
-    const total = transcripts.length;
-    const words = transcripts.reduce((acc, t) => acc + countWords(t.transcriptText), 0);
+    const completed = transcripts.filter((t) => t.isTranscribed || (t.transcriptStatus || '').toUpperCase() === 'COMPLETED');
+    const total = completed.length;
+    const words = completed.reduce((acc, t) => acc + countWords(t.transcriptText), 0);
     const readMin = Math.max(0, Math.round(words / 200));
     const latestRaw = transcripts
       .map((t) => t.webinarDate)
@@ -531,6 +599,7 @@ export default function MeetingTranscribe() {
             const host = item.conductorName || 'Speaker';
             const words = countWords(item.transcriptText);
             const expanded = !!expandedIds[item.id];
+            const statusInfo = getStatusInfo(item);
 
             return (
               <Paper
@@ -593,10 +662,19 @@ export default function MeetingTranscribe() {
                           {item.webinarName}
                         </Typography>
                         <Chip
-                          icon={<CheckCircleIcon sx={{ fontSize: '16px !important', color: '#16A34A !important' }} />}
-                          label="Transcribed"
+                          icon={statusInfo.icon}
+                          label={statusInfo.label}
                           size="small"
-                          sx={{ height: 26, fontWeight: 700, fontSize: '0.76rem', bgcolor: '#DCFCE7', color: '#166534', borderRadius: '999px' }}
+                          sx={{
+                            height: 26,
+                            fontWeight: 700,
+                            fontSize: '0.76rem',
+                            bgcolor: statusInfo.chipBg,
+                            color: statusInfo.chipColor,
+                            border: `1px solid ${statusInfo.chipBorder}`,
+                            borderRadius: '999px',
+                            px: 0.5,
+                          }}
                         />
                         {item.categoryName && (
                           <Chip
@@ -617,119 +695,219 @@ export default function MeetingTranscribe() {
                             {formatUtcToLocalDateOnly(item.webinarDate)}
                           </Typography>
                         </Box>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6 }}>
-                          <TextSnippetOutlinedIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
-                          <Typography sx={{ fontSize: '0.85rem', color: colors.textSecondary, fontWeight: 600 }}>
-                            {words.toLocaleString()} words
+                        {statusInfo.type === 'COMPLETED' ? (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6 }}>
+                            <TextSnippetOutlinedIcon sx={{ fontSize: 16, color: colors.textSecondary }} />
+                            <Typography sx={{ fontSize: '0.85rem', color: colors.textSecondary, fontWeight: 600 }}>
+                              {words.toLocaleString()} words
+                            </Typography>
+                          </Box>
+                        ) : statusInfo.type === 'PROCESSING' ? (
+                          <Typography sx={{ fontSize: '0.82rem', color: '#0284C7', fontWeight: 600 }}>
+                            Transcribing audio...
                           </Typography>
-                        </Box>
+                        ) : (
+                          <Typography sx={{ fontSize: '0.82rem', color: '#D97706', fontWeight: 600 }}>
+                            Live session
+                          </Typography>
+                        )}
                       </Box>
                     </Box>
                   </Box>
 
-                  <Box sx={{ display: 'flex', gap: 1.2, flexWrap: 'wrap' }}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<ContentCopyIcon sx={{ fontSize: 18 }} />}
-                      onClick={() => handleCopyText(item.transcriptText, item.webinarName)}
-                      sx={{
-                        borderRadius: '14px',
-                        py: 1,
-                        px: 2,
-                        textTransform: 'none',
-                        fontWeight: 700,
-                        color: '#1D4ED8',
-                        borderColor: 'rgba(66,133,244,0.45)',
-                        bgcolor: 'rgba(66,133,244,0.05)',
-                        '&:hover': { bgcolor: 'rgba(66,133,244,0.12)', borderColor: '#4285F4' },
-                      }}
-                    >
-                      Copy Text
-                    </Button>
-                    <Button
-                      variant="contained"
-                      startIcon={<DownloadIcon sx={{ fontSize: 18 }} />}
-                      onClick={() => handleDownloadTxt(item.transcriptText, item.webinarName)}
-                      sx={{
-                        borderRadius: '14px',
-                        py: 1,
-                        px: 2.2,
-                        textTransform: 'none',
-                        fontWeight: 800,
-                        color: '#FFFFFF',
-                        background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
-                        boxShadow: '0 8px 20px rgba(234,88,12,0.30)',
-                        '&:hover': {
-                          background: 'linear-gradient(135deg, #FB923C 0%, #EA580C 100%)',
-                          boxShadow: '0 12px 26px rgba(234,88,12,0.42)',
-                        },
-                      }}
-                    >
-                      Download .txt
-                    </Button>
+                  <Box sx={{ display: 'flex', gap: 1.2, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {statusInfo.type === 'COMPLETED' ? (
+                      <>
+                        <Button
+                          variant="outlined"
+                          startIcon={<ContentCopyIcon sx={{ fontSize: 18 }} />}
+                          onClick={() => handleCopyText(item.transcriptText, item.webinarName)}
+                          sx={{
+                            borderRadius: '14px',
+                            py: 1,
+                            px: 2,
+                            textTransform: 'none',
+                            fontWeight: 700,
+                            color: '#1D4ED8',
+                            borderColor: 'rgba(66,133,244,0.45)',
+                            bgcolor: 'rgba(66,133,244,0.05)',
+                            '&:hover': { bgcolor: 'rgba(66,133,244,0.12)', borderColor: '#4285F4' },
+                          }}
+                        >
+                          Copy Text
+                        </Button>
+                        <Button
+                          variant="contained"
+                          startIcon={<DownloadIcon sx={{ fontSize: 18 }} />}
+                          onClick={() => handleDownloadTxt(item.transcriptText, item.webinarName)}
+                          sx={{
+                            borderRadius: '14px',
+                            py: 1,
+                            px: 2.2,
+                            textTransform: 'none',
+                            fontWeight: 800,
+                            color: '#FFFFFF',
+                            background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+                            boxShadow: '0 8px 20px rgba(234,88,12,0.30)',
+                            '&:hover': {
+                              background: 'linear-gradient(135deg, #FB923C 0%, #EA580C 100%)',
+                              boxShadow: '0 12px 26px rgba(234,88,12,0.42)',
+                            },
+                          }}
+                        >
+                          Download .txt
+                        </Button>
+                      </>
+                    ) : statusInfo.type === 'PROCESSING' ? (
+                      <Chip
+                        icon={<CircularProgress size={14} thickness={5} sx={{ color: '#0284C7 !important' }} />}
+                        label="Generating Transcript..."
+                        sx={{
+                          height: 32,
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          bgcolor: 'rgba(2,132,199,0.10)',
+                          color: '#0284C7',
+                          border: '1px solid rgba(2,132,199,0.25)',
+                          borderRadius: '12px',
+                          px: 1,
+                        }}
+                      />
+                    ) : (
+                      <Chip
+                        label="Live Now"
+                        sx={{
+                          height: 32,
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          bgcolor: 'rgba(245,158,11,0.15)',
+                          color: '#B45309',
+                          border: '1px solid rgba(245,158,11,0.35)',
+                          borderRadius: '12px',
+                          px: 1,
+                        }}
+                      />
+                    )}
                   </Box>
                 </Box>
 
                 {/* Transcript body */}
                 <Box sx={{ p: { xs: 2.25, sm: 3 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                    <GraphicEqIcon sx={{ fontSize: 20, color: '#EA580C' }} />
-                    <Typography sx={{ fontWeight: 800, fontSize: '0.78rem', color: '#EA580C', textTransform: 'uppercase', letterSpacing: '0.9px' }}>
-                      Full Speech Transcript
+                    <GraphicEqIcon sx={{ fontSize: 20, color: statusInfo.type === 'COMPLETED' ? '#EA580C' : statusInfo.type === 'PROCESSING' ? '#0284C7' : '#D97706' }} />
+                    <Typography sx={{ fontWeight: 800, fontSize: '0.78rem', color: statusInfo.type === 'COMPLETED' ? '#EA580C' : statusInfo.type === 'PROCESSING' ? '#0284C7' : '#D97706', textTransform: 'uppercase', letterSpacing: '0.9px' }}>
+                      {statusInfo.type === 'COMPLETED' ? 'Full Speech Transcript' : statusInfo.type === 'PROCESSING' ? 'Transcription Status' : 'Session Status'}
                     </Typography>
                   </Box>
 
-                  <Box sx={{ position: 'relative' }}>
+                  {statusInfo.type === 'COMPLETED' ? (
+                    <>
+                      <Box sx={{ position: 'relative' }}>
+                        <Box
+                          sx={{
+                            p: 2.5,
+                            borderRadius: '20px',
+                            bgcolor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(100,116,139,0.06)',
+                            border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.12)'}`,
+                            lineHeight: 1.85,
+                            fontSize: '15px',
+                            color: colors.textPrimary,
+                            whiteSpace: 'pre-wrap',
+                            fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                            maxHeight: expanded ? 800 : 92,
+                            overflowY: expanded ? 'auto' : 'hidden',
+                            transition: 'max-height 0.35s ease',
+                          }}
+                        >
+                          {item.transcriptText || 'No transcript text available for this recording.'}
+                        </Box>
+
+                        {!expanded && words > 35 && (
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              left: 1,
+                              right: 1,
+                              bottom: 1,
+                              height: 48,
+                              borderRadius: '0 0 20px 20px',
+                              pointerEvents: 'none',
+                              background: isDark
+                                ? `linear-gradient(180deg, transparent, ${colors.surface})`
+                                : 'linear-gradient(180deg, rgba(248,250,252,0), #F4F6F9)',
+                            }}
+                          />
+                        )}
+                      </Box>
+
+                      {words > 35 && (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1.5 }}>
+                          <Button
+                            onClick={() => toggleExpand(item.id)}
+                            endIcon={
+                              <ExpandMoreIcon
+                                sx={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.25s ease' }}
+                              />
+                            }
+                            sx={{ textTransform: 'none', fontWeight: 700, color: '#EA580C', borderRadius: '999px', px: 2.5 }}
+                          >
+                            {expanded ? 'Show less' : 'Read full transcript'}
+                          </Button>
+                        </Box>
+                      )}
+                    </>
+                  ) : statusInfo.type === 'PROCESSING' ? (
                     <Box
                       sx={{
-                        p: 2.5,
+                        p: 3,
                         borderRadius: '20px',
-                        bgcolor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(100,116,139,0.06)',
-                        border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.12)'}`,
-                        lineHeight: 1.85,
-                        fontSize: '15px',
-                        color: colors.textPrimary,
-                        whiteSpace: 'pre-wrap',
-                        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-                        maxHeight: expanded ? 520 : 190,
-                        overflowY: expanded ? 'auto' : 'hidden',
-                        transition: 'max-height 0.35s ease',
+                        bgcolor: isDark ? 'rgba(2, 132, 199, 0.08)' : '#F0F9FF',
+                        border: '1px solid rgba(2, 132, 199, 0.25)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 2.5,
                       }}
                     >
-                      {item.transcriptText || 'No transcript text available for this recording.'}
+                      <CircularProgress size={30} thickness={4.5} sx={{ color: '#0284C7', flexShrink: 0 }} />
+                      <Box>
+                        <Typography sx={{ fontWeight: 800, color: isDark ? '#7DD3FC' : '#0369A1', fontSize: '0.98rem', mb: 0.35 }}>
+                          transcription is under processing
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.86rem', color: colors.textSecondary, lineHeight: 1.55 }}>
+                          Audio is currently being transcribed using Groq Whisper. The full speech transcript will appear here automatically once processing completes.
+                        </Typography>
+                      </Box>
                     </Box>
-
-                    {!expanded && words > 60 && (
+                  ) : (
+                    <Box
+                      sx={{
+                        p: 3,
+                        borderRadius: '20px',
+                        bgcolor: isDark ? 'rgba(245, 158, 11, 0.08)' : '#FFFBEB',
+                        border: '1px solid rgba(245, 158, 11, 0.28)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 2.5,
+                      }}
+                    >
                       <Box
                         sx={{
-                          position: 'absolute',
-                          left: 1,
-                          right: 1,
-                          bottom: 1,
-                          height: 70,
-                          borderRadius: '0 0 20px 20px',
-                          pointerEvents: 'none',
-                          background: isDark
-                            ? `linear-gradient(180deg, transparent, ${colors.surface})`
-                            : 'linear-gradient(180deg, rgba(248,250,252,0), #F4F6F9)',
+                          width: 14,
+                          height: 14,
+                          borderRadius: '50%',
+                          bgcolor: '#D97706',
+                          boxShadow: '0 0 0 5px rgba(245, 158, 11, 0.35)',
+                          flexShrink: 0,
                         }}
                       />
-                    )}
-                  </Box>
-
-                  {words > 60 && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1.5 }}>
-                      <Button
-                        onClick={() => toggleExpand(item.id)}
-                        endIcon={
-                          <ExpandMoreIcon
-                            sx={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.25s ease' }}
-                          />
-                        }
-                        sx={{ textTransform: 'none', fontWeight: 700, color: '#EA580C', borderRadius: '999px', px: 2.5 }}
-                      >
-                        {expanded ? 'Show less' : 'Read full transcript'}
-                      </Button>
+                      <Box>
+                        <Typography sx={{ fontWeight: 800, color: isDark ? '#FCD34D' : '#B45309', fontSize: '0.98rem', mb: 0.35 }}>
+                          Webinar is going
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.86rem', color: colors.textSecondary, lineHeight: 1.55 }}>
+                          This webinar session is currently in progress. Meeting transcript will be generated automatically after the session ends.
+                        </Typography>
+                      </Box>
                     </Box>
                   )}
                 </Box>

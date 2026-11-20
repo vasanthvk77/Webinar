@@ -432,16 +432,17 @@ public class WebinarsController : ControllerBase
     // POST /api/webinars/hold-seat — Atomically reserve a seat for 5 mins (BookMyShow pattern)
     // -------------------------------------------------------
     [HttpPost("hold-seat")]
-    [AllowAnonymous]
     public async Task<IActionResult> HoldSeat([FromBody] HoldSeatRequest request)
     {
-        int targetUserId = CallerUserId > 0 ? CallerUserId : (request.UserId ?? 0);
-        _logger.LogInformation("[WebinarsController] POST /api/webinars/hold-seat — TargetUserId: {UserId}, TrackingId: {TrackingId}", targetUserId, request.TrackingId);
+        if (CallerUserId <= 0)
+            return Unauthorized(new { success = false, message = "Authentication required to reserve a seat." });
+
+        _logger.LogInformation("[WebinarsController] POST /api/webinars/hold-seat — CallerUserId: {UserId}, TrackingId: {TrackingId}", CallerUserId, request.TrackingId);
 
         if (string.IsNullOrWhiteSpace(request.TrackingId))
             return BadRequest(new { success = false, message = "Tracking ID is required." });
 
-        var result = await _webinarService.HoldSeatAsync(request.TrackingId, targetUserId);
+        var result = await _webinarService.HoldSeatAsync(request.TrackingId, CallerUserId);
 
         if (!result.Success)
         {
@@ -460,14 +461,13 @@ public class WebinarsController : ControllerBase
     [HttpPost("register-tracking")]
     public async Task<IActionResult> RegisterTracking([FromBody] RegisterTrackingRequest request)
     {
-        int targetUserId = CallerUserId > 0 ? CallerUserId : (request.UserId ?? 0);
-        if (targetUserId <= 0)
-            return Unauthorized(new { success = false, message = "User authentication required" });
+        if (CallerUserId <= 0)
+            return Unauthorized(new { success = false, message = "User authentication required." });
 
         if (string.IsNullOrWhiteSpace(request.TrackingId))
-            return BadRequest(new { success = false, message = "Tracking ID is required" });
+            return BadRequest(new { success = false, message = "Tracking ID is required." });
 
-        var (success, message, webinarName) = await _webinarService.RegisterTrackingAsync(request.TrackingId, targetUserId, request.HoldToken);
+        var (success, message, webinarName) = await _webinarService.RegisterTrackingAsync(request.TrackingId, CallerUserId, request.HoldToken);
 
         if (!success)
             return BadRequest(new { success = false, message, webinarName });

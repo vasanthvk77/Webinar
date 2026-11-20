@@ -136,10 +136,42 @@ export const getCurrencySymbolFromCountryCode = (code) => {
 
 /**
  * Format price according to user's country currency symbol
+ * Polymorphic: handles formatWebinarPrice(isPaid, price, countryCode)
+ *         and: formatWebinarPrice(webinarObject, countryCode)
  * e.g. formatWebinarPrice(true, 200, '+91') => '₹200'
  */
-export const formatWebinarPrice = (isPaid, price, countryCode) => {
-  if (!isPaid || price == null || price <= 0) return 'Free';
-  const symbol = getCurrencySymbolFromCountryCode(countryCode);
-  return `${symbol}${price}`;
+export const formatWebinarPrice = (isPaidOrWebinar, priceOrCountryCode, countryCode) => {
+  // Case 1: First argument is a webinar object: formatWebinarPrice(webinar, countryCode)
+  if (isPaidOrWebinar && typeof isPaidOrWebinar === 'object') {
+    const webinar = isPaidOrWebinar;
+    const userCountry = priceOrCountryCode || countryCode || '+91';
+    if (!webinar.isPaid) return 'Free';
+
+    let resolvedPrice = webinar.price;
+    let resolvedCurrency = getCurrencySymbolFromCountryCode(userCountry);
+
+    // If webinar has country-specific pricing configured
+    if (Array.isArray(webinar.countryPrices) && webinar.countryPrices.length > 0) {
+      const cleanUser = (userCountry || '').toString().replace(/[^\d]/g, '');
+      const match = webinar.countryPrices.find((cp) => {
+        const cleanCp = (cp.countryCode || '').toString().replace(/[^\d]/g, '');
+        return cleanCp === cleanUser;
+      });
+      if (match && match.amount != null && match.amount > 0) {
+        resolvedPrice = match.amount;
+        if (match.currencySymbol) resolvedCurrency = match.currencySymbol;
+      }
+    }
+
+    if (resolvedPrice == null || Number(resolvedPrice) <= 0) return 'Free';
+    return `${resolvedCurrency}${Number(resolvedPrice).toLocaleString()}`;
+  }
+
+  // Case 2: Classic 3-argument signature: formatWebinarPrice(isPaid, price, countryCode)
+  const isPaid = isPaidOrWebinar;
+  const price = priceOrCountryCode;
+  if (!isPaid || price == null || Number(price) <= 0) return 'Free';
+
+  const symbol = getCurrencySymbolFromCountryCode(countryCode || '+91');
+  return `${symbol}${Number(price).toLocaleString()}`;
 };

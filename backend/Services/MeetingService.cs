@@ -28,6 +28,7 @@ public class MeetingService : IMeetingService
     private readonly string _joinMeetingApi;
     private readonly string _serverToServerUrl;
     private readonly int _gracePeriodInMinutes;
+    private readonly int _graceParticipantCount;
 
     public MeetingService(
         IConfiguration config,
@@ -45,6 +46,11 @@ public class MeetingService : IMeetingService
         _joinMeetingApi = config["BBB:JoinMeetingApi"]?.Trim() ?? string.Empty;
         _serverToServerUrl = (config["BBB:ServerToServerUrl"] ?? config["BBB:EndedURL"] ?? string.Empty).Trim();
         _gracePeriodInMinutes = config.GetValue<int>("MeetingScheduleChecker:GracePeriodInMinutes", 5);
+        _graceParticipantCount = config.GetValue<int?>("garceParticpantCount")
+                              ?? config.GetValue<int?>("graceParticipantCount")
+                              ?? config.GetValue<int?>("BBB:garceParticpantCount")
+                              ?? config.GetValue<int?>("BBB:GraceParticipantCount")
+                              ?? 5;
     }
 
     public async Task<(bool success, string message, MeetingDto? meeting)> ScheduleMeetingAsync(ScheduleMeetingRequest request, int userId)
@@ -93,11 +99,24 @@ public class MeetingService : IMeetingService
             _logger.LogInformation("[MeetingService] Schedule timing calculation: Webinar Start UTC = {Start:yyyy-MM-dd HH:mm:ss}, Grace = {Grace}m, Now UTC = {Now:yyyy-MM-dd HH:mm:ss}, Calculated Expiry = {Expiry}m",
                 startTimeUtc, _gracePeriodInMinutes, nowUtc, calculatedExpiryMinutes);
 
+            // Fetch current registration count for this webinar
+            var registrationCount = await conn.ExecuteScalarAsync<int>(
+                "SELECT COUNT(1) FROM wms.WebinarRegistrations WHERE WebinarId = @WebinarId",
+                new { WebinarId = request.WebinarId }
+            );
+
+            // Calculate MaxParticipants: Registration Count + Grace Count
+            int calculatedMaxParticipants = (registrationCount > 0 ? registrationCount : request.MaxParticipants) + _graceParticipantCount;
+
+            _logger.LogInformation("[MeetingService] MaxParticipants for WebinarId {WebinarId}: Registrations={RegCount}, Request={ReqMax}, Grace={Grace} => Final={FinalMax}",
+                request.WebinarId, registrationCount, request.MaxParticipants, _graceParticipantCount, calculatedMaxParticipants);
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss} SCHEDULE] 👥 MaxParticipants calculated: Registrations={registrationCount}, Grace={_graceParticipantCount} => Final={calculatedMaxParticipants}");
+
             var parameters = new DynamicParameters();
             parameters.Add("@WebinarId", request.WebinarId);
             parameters.Add("@MeetingID", request.MeetingID.Trim());
             parameters.Add("@Name", request.Name.Trim());
-            parameters.Add("@MaxParticipants", request.MaxParticipants);
+            parameters.Add("@MaxParticipants", calculatedMaxParticipants);
             parameters.Add("@Duration", request.Duration);
             parameters.Add("@Record", request.Record);
             parameters.Add("@AutoStartRecording", request.AutoStartRecording);
@@ -110,6 +129,10 @@ public class MeetingService : IMeetingService
             parameters.Add("@MuteOnStart", request.MuteOnStart);
             parameters.Add("@MeetingLayout", string.IsNullOrWhiteSpace(request.MeetingLayout) ? "UNIFIED_LAYOUT" : request.MeetingLayout.Trim());
             parameters.Add("@LockSettingsPresenterPolicy", string.IsNullOrWhiteSpace(request.LockSettingsPresenterPolicy) ? "default" : request.LockSettingsPresenterPolicy.Trim());
+            parameters.Add("@LockSettingsDisableMic", request.LockSettingsDisableMic);
+            parameters.Add("@LockSettingsDisableCam", request.LockSettingsDisableCam);
+            parameters.Add("@LockSettingsDisablePrivateChat", request.LockSettingsDisablePrivateChat);
+            parameters.Add("@WebcamsOnlyForModerator", request.WebcamsOnlyForModerator);
             parameters.Add("@ModeratorPW", string.IsNullOrWhiteSpace(request.ModeratorPW) ? null : request.ModeratorPW.Trim());
             parameters.Add("@AttendeePW", string.IsNullOrWhiteSpace(request.AttendeePW) ? null : request.AttendeePW.Trim());
             parameters.Add("@UserId", userId);
@@ -145,6 +168,10 @@ public class MeetingService : IMeetingService
                 savedMeeting.EndWhenNoModerator,
                 savedMeeting.GuestPolicy,
                 savedMeeting.MuteOnStart,
+                savedMeeting.LockSettingsDisableMic,
+                savedMeeting.LockSettingsDisableCam,
+                savedMeeting.LockSettingsDisablePrivateChat,
+                savedMeeting.WebcamsOnlyForModerator,
                 savedMeeting.MeetingLayout,
                 savedMeeting.LogoutURL,
                 savedMeeting.LockSettingsPresenterPolicy,
@@ -220,12 +247,14 @@ public class MeetingService : IMeetingService
                 return (false, "No scheduled meeting configuration found for this webinar.", null);
             }
 
+            int effectiveMaxParticipants = (meeting.TotalRegistrations > 0 ? meeting.TotalRegistrations : meeting.MaxParticipants) + _graceParticipantCount;
+
             var (success, newModeratorJoinUrl) = await CallBbbCreateMeetingInternalAsync(
                 meeting.Id,
                 meeting.WebinarId,
                 meeting.MeetingID,
                 meeting.Name,
-                meeting.MaxParticipants,
+                effectiveMaxParticipants,
                 meeting.Duration,
                 meeting.Record,
                 meeting.AutoStartRecording,
@@ -235,6 +264,10 @@ public class MeetingService : IMeetingService
                 meeting.EndWhenNoModerator,
                 meeting.GuestPolicy,
                 meeting.MuteOnStart,
+                meeting.LockSettingsDisableMic,
+                meeting.LockSettingsDisableCam,
+                meeting.LockSettingsDisablePrivateChat,
+                meeting.WebcamsOnlyForModerator,
                 meeting.MeetingLayout,
                 meeting.LogoutURL,
                 meeting.LockSettingsPresenterPolicy,
@@ -276,6 +309,10 @@ public class MeetingService : IMeetingService
         bool endWhenNoModerator,
         string guestPolicy,
         bool muteOnStart,
+        bool lockSettingsDisableMic,
+        bool lockSettingsDisableCam,
+        bool lockSettingsDisablePrivateChat,
+        bool webcamsOnlyForModerator,
         string meetingLayout,
         string? logoutURL,
         string? lockSettingsPresenterPolicy,
@@ -291,7 +328,8 @@ public class MeetingService : IMeetingService
                 new("name", name.Trim()),
                 new("meetingID", meetingID.Trim()),
                 new("maxParticipants", maxParticipants.ToString()),
-                new("duration", duration.ToString()),
+                // Pass duration=0 to BigBlueButton so it never auto-terminates the meeting due to timer expiration
+                new("duration", "0"),
                 new("record", record ? "true" : "false"),
                 new("autoStartRecording", autoStartRecording ? "true" : "false"),
                 new("allowStartStopRecording", allowStartStopRecording ? "true" : "false"),
@@ -300,6 +338,10 @@ public class MeetingService : IMeetingService
                 new("endWhenNoModerator", endWhenNoModerator ? "true" : "false"),
                 new("guestPolicy", string.IsNullOrWhiteSpace(guestPolicy) ? "ALWAYS_ACCEPT" : guestPolicy.Trim()),
                 new("muteOnStart", muteOnStart ? "true" : "false"),
+                new("lockSettingsDisableMic", lockSettingsDisableMic ? "true" : "false"),
+                new("lockSettingsDisableCam", lockSettingsDisableCam ? "true" : "false"),
+                new("lockSettingsDisablePrivateChat", lockSettingsDisablePrivateChat ? "true" : "false"),
+                new("webcamsOnlyForModerator", webcamsOnlyForModerator ? "true" : "false"),
                 new("meetingLayout", string.IsNullOrWhiteSpace(meetingLayout) ? "UNIFIED_LAYOUT" : meetingLayout.Trim()),
                 new("meta_webinarId", webinarId.ToString())
             };
@@ -694,18 +736,17 @@ public class MeetingService : IMeetingService
             }
         }
 
-        // 3. Fallback: If BBB already purged the meeting from RAM, record all registered students with join links
+        // 3. Fallback: If BBB already purged the meeting from RAM, record all registered students for this webinar
         if (attendeesToProcess.Count == 0)
         {
-            var existingLinks = (await conn.QueryAsync<string>(
-                @"SELECT wr.CustomUserId 
-                  FROM wms.AttendeeMeetingLinks aml
-                  JOIN wms.WebinarRegistrations wr ON wr.Id = aml.WebinarRegistrationId
-                  WHERE aml.MeetingId = @MeetingDbId AND wr.CustomUserId IS NOT NULL",
-                new { MeetingDbId = meeting.Id }
+            var studentCustomUids = (await conn.QueryAsync<string>(
+                @"SELECT DISTINCT wr.CustomUserId 
+                  FROM wms.WebinarRegistrations wr
+                  WHERE wr.WebinarId = @WebinarId AND wr.CustomUserId IS NOT NULL",
+                new { WebinarId = meeting.WebinarId }
             )).ToList();
 
-            foreach (var customUid in existingLinks)
+            foreach (var customUid in studentCustomUids)
             {
                 attendeesToProcess.Add((customUid, defaultDurationSeconds, null, null));
             }

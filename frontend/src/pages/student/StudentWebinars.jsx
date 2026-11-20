@@ -14,6 +14,9 @@ import {
   DialogContent,
   DialogActions,
   Divider,
+  Radio,
+  RadioGroup,
+  FormControlLabel,
 } from '@mui/material';
 
 import BookmarkAddedIcon from '@mui/icons-material/BookmarkAdded';
@@ -25,6 +28,8 @@ import VideoCameraFrontIcon from '@mui/icons-material/VideoCameraFront';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import SchoolIcon from '@mui/icons-material/School';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import toast from 'react-hot-toast';
 
 import { webinarService, studentProfileService, calendarService } from '../../services/api';
@@ -118,7 +123,7 @@ export default function StudentWebinars() {
   const [loading, setLoading] = useState(true);
 
   // Student country code for dynamic currency conversion
-  const [countryCode, setCountryCode] = useState(() => user?.countryCode || null);
+  const [countryCode, setCountryCode] = useState(() => user?.countryCode || '+91');
 
   // Synchronize countryCode whenever user context updates
   useEffect(() => {
@@ -141,6 +146,9 @@ export default function StudentWebinars() {
   const [activeHold, setActiveHold] = useState(null); // { webinar, holdToken, expiresAt, remainingSeconds }
   const [holdCountdown, setHoldCountdown] = useState(300);
   const [confirmingHold, setConfirmingHold] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('upi');
+  const [profileIncompleteModal, setProfileIncompleteModal] = useState({ open: false, missingFields: [] });
+  const hasHandledRegisterRef = React.useRef(false);
 
   // Keep activeTab synchronized if URL query changes
   useEffect(() => {
@@ -253,6 +261,58 @@ export default function StudentWebinars() {
   useEffect(() => {
     loadAllData();
   }, [loadAllData]);
+
+  // ── Auto-trigger in-app registration if arriving via shared deep-link (?register= or ?trackingId=) ──
+  useEffect(() => {
+    const registerParam = searchParams.get('register') || searchParams.get('trackingId');
+    if (!registerParam || loading || hasHandledRegisterRef.current) return;
+
+    // 1. Check if already registered
+    const isAlreadyRegistered = registeredWebinars.some(
+      (w) => String(w.shareId) === String(registerParam) || String(w.id || w.webinarId) === String(registerParam)
+    );
+
+    if (isAlreadyRegistered) {
+      hasHandledRegisterRef.current = true;
+      toast('You are already registered for this webinar!', { icon: 'ℹ️' });
+      setActiveTab('registered');
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('register');
+      nextParams.delete('trackingId');
+      nextParams.set('tab', 'registered');
+      setSearchParams(nextParams, { replace: true });
+      return;
+    }
+
+    // 2. Check in available webinars
+    const availMatch = availableWebinars.find(
+      (w) => String(w.shareId) === String(registerParam) || String(w.id || w.webinarId) === String(registerParam)
+    );
+
+    if (availMatch) {
+      hasHandledRegisterRef.current = true;
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('register');
+      nextParams.delete('trackingId');
+      setSearchParams(nextParams, { replace: true });
+      handleRegister(availMatch);
+    } else {
+      // 3. Fallback: fetch directly by shareId
+      webinarService
+        .getPublic(registerParam)
+        .then((res) => {
+          if (res.data?.success && res.data.data) {
+            hasHandledRegisterRef.current = true;
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.delete('register');
+            nextParams.delete('trackingId');
+            setSearchParams(nextParams, { replace: true });
+            handleRegister(res.data.data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [searchParams, loading, registeredWebinars, availableWebinars]);
 
   // Tick active hold countdown timer
   useEffect(() => {
@@ -387,19 +447,67 @@ export default function StudentWebinars() {
     }
   };
 
-  // ── Register for Available Webinar handler ──
+  // ── Register for Available Webinar handler (Free & Paid) ──
   const handleRegister = async (webinar) => {
-    // Paid webinars: navigate to the registration screen
-    if (webinar.isPaid) {
-      navigate(`/register?trackingId=${webinar.shareId}`);
+    const wid = webinar.id || webinar.webinarId;
+    if (registeredIds.has(wid) || Boolean(webinar.isRegistered)) {
+      toast('You are already registered for this webinar!', { icon: 'ℹ️' });
+      setActiveTab('registered');
       return;
     }
 
     const currentUserId = user?.userId || user?.id;
-    setRegisteringId(webinar.id);
+    if (!currentUserId) {
+      toast.error('Session expired. Please log in again.');
+      return;
+    }
+
+    setRegisteringId(wid);
     try {
-      // Free webinars on dashboard: hold seat and show confirmation
-      const holdRes = await webinarService.holdSeat(webinar.shareId || webinar.id, currentUserId);
+      // 1. Check profile completion first via /api/student/profile
+      // Mandatory fields for certificate: firstName, lastName, email, country, department, year
+      const profileRes = await studentProfileService.getProfile();
+      const profileData = profileRes.data?.data;
+
+      const missing = [];
+      if (!profileData?.firstName || !profileData.firstName.trim()) {
+        missing.push('First Name');
+      }
+      if (!profileData?.lastName || !profileData.lastName.trim()) {
+        missing.push('Last Name');
+      }
+      if (!profileData?.email || !profileData.email.trim()) {
+        missing.push('Email Address');
+      }
+      const hasCountry = Boolean(
+        (profileData?.countryCode && profileData.countryCode.trim()) ||
+        (profileData?.countryName && profileData.countryName.trim())
+      );
+      if (!hasCountry) {
+        missing.push('Country');
+      }
+      if (!profileData?.department || !profileData.department.trim()) {
+        missing.push('Department');
+      }
+      if (!profileData?.year || !String(profileData.year).trim()) {
+        missing.push('Year of Study');
+      }
+
+      if (missing.length > 0) {
+        setRegisteringId(null);
+        setProfileIncompleteModal({
+          open: true,
+          missingFields: missing,
+        });
+        return;
+      }
+
+      if (profileData?.countryCode) {
+        setCountryCode(profileData.countryCode);
+      }
+
+      // 2. All required profile details are present: hold seat for 5 mins
+      const holdRes = await webinarService.holdSeat(webinar.shareId || wid, currentUserId);
       if (holdRes.data?.success && holdRes.data?.data) {
         const holdData = holdRes.data.data;
         setActiveHold({
@@ -421,7 +529,7 @@ export default function StudentWebinars() {
     }
   };
 
-  // ── Finalize Confirmation with HoldToken (Case A) ───────────
+  // ── Finalize Confirmation with HoldToken (Free & Paid) ───────────
   const handleConfirmReservation = async () => {
     if (!activeHold) return;
     const currentUserId = user?.userId || user?.id;
@@ -437,6 +545,7 @@ export default function StudentWebinars() {
         toast.success(res.data.message || 'Seat confirmed successfully!');
         setActiveHold(null);
         await loadAllData();
+        setActiveTab('registered');
       } else {
         toast.error(res.data?.message || 'Registration failed');
       }
@@ -781,6 +890,8 @@ export default function StudentWebinars() {
                   registeredBadgeType = 'COMPLETED';
                 }
 
+                const isJoinWebinar = !isSessionEnded && canJoinNow;
+
                 return (
                   <Box key={`registered-${wid}`} sx={{ display: 'flex', width: '100%', minWidth: 0 }}>
                     <CardComponent
@@ -789,15 +900,22 @@ export default function StudentWebinars() {
                       countryCode={countryCode}
                       statusLabel={registeredStatusLabel}
                       price={formattedPrice}
-                      primaryLabel={
-                        isSessionEnded
-                          ? 'Session Details'
-                          : canJoinNow
-                          ? 'Join Webinar'
-                          : 'Session Details'
+                      primaryLabel={isJoinWebinar ? 'Join Webinar' : 'Session Details'}
+                      primarySx={
+                        isJoinWebinar
+                          ? {
+                              background: 'linear-gradient(135deg, #16A34A 0%, #22C55E 100%)',
+                              color: '#FFFFFF',
+                              boxShadow: '0 4px 14px rgba(22, 163, 74, 0.32)',
+                              '&:hover': {
+                                background: 'linear-gradient(135deg, #15803D 0%, #16A34A 100%)',
+                                boxShadow: '0 6px 18px rgba(22, 163, 74, 0.42)',
+                              },
+                            }
+                          : undefined
                       }
                       onPrimaryClick={
-                        canJoinNow && (w.attendeeJoinUrl || w.joinLink)
+                        isJoinWebinar && (w.attendeeJoinUrl || w.joinLink)
                           ? () => window.open(w.attendeeJoinUrl || w.joinLink, '_blank')
                           : () => setDetailsModalWebinar(w)
                       }
@@ -1150,6 +1268,82 @@ export default function StudentWebinars() {
               </Typography>
             </Box>
 
+            {/* Paid Webinar Fee & Payment Method Selection */}
+            {activeHold.webinar?.isPaid && (
+              <Box
+                sx={{
+                  width: '100%',
+                  bgcolor: colors.bg,
+                  borderRadius: '16px',
+                  p: 2,
+                  mb: 2.5,
+                  textAlign: 'left',
+                  border: `1px solid ${colors.border}`,
+                }}
+              >
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: colors.textSecondary }}>
+                    Registration Fee:
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#EA580C' }}>
+                    {formatWebinarPrice(activeHold.webinar?.isPaid, activeHold.webinar?.price, countryCode)}
+                  </Typography>
+                </Box>
+
+                <Divider sx={{ my: 1, borderColor: colors.border }} />
+
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontWeight: 700,
+                    color: colors.textSecondary,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    display: 'block',
+                    mb: 1,
+                  }}
+                >
+                  Payment Method
+                </Typography>
+
+                <RadioGroup
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                >
+                  <FormControlLabel
+                    value="upi"
+                    control={<Radio size="small" sx={{ color: '#EA580C', '&.Mui-checked': { color: '#EA580C' } }} />}
+                    label={
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: colors.textPrimary }}>
+                        UPI / QR (Google Pay, PhonePe, Paytm)
+                      </Typography>
+                    }
+                  />
+                  <FormControlLabel
+                    value="card"
+                    control={<Radio size="small" sx={{ color: '#EA580C', '&.Mui-checked': { color: '#EA580C' } }} />}
+                    label={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CreditCardIcon sx={{ fontSize: 18, color: colors.textSecondary }} />
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: colors.textPrimary }}>
+                          Credit / Debit Card
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                  <FormControlLabel
+                    value="netbanking"
+                    control={<Radio size="small" sx={{ color: '#EA580C', '&.Mui-checked': { color: '#EA580C' } }} />}
+                    label={
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: colors.textPrimary }}>
+                        Net Banking
+                      </Typography>
+                    }
+                  />
+                </RadioGroup>
+              </Box>
+            )}
+
             {/* Action Buttons */}
             <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 1.25 }}>
               <Button
@@ -1157,6 +1351,7 @@ export default function StudentWebinars() {
                 variant="contained"
                 onClick={handleConfirmReservation}
                 disabled={confirmingHold}
+                startIcon={activeHold.webinar?.isPaid ? <LockOutlinedIcon sx={{ fontSize: 18 }} /> : null}
                 sx={{
                   py: 1.35,
                   borderRadius: '12px',
@@ -1169,7 +1364,11 @@ export default function StudentWebinars() {
                   '&:hover': { bgcolor: '#C2410C' },
                 }}
               >
-                {confirmingHold ? 'Confirming...' : 'Confirm Seat Now'}
+                {confirmingHold
+                  ? 'Confirming...'
+                  : activeHold.webinar?.isPaid
+                  ? `Pay & Confirm Seat (${formatWebinarPrice(activeHold.webinar?.isPaid, activeHold.webinar?.price, countryCode)})`
+                  : 'Confirm Seat Now'}
               </Button>
 
               <Button
@@ -1191,6 +1390,160 @@ export default function StudentWebinars() {
           </Box>
         </Dialog>
       )}
+
+      {/* ── Incomplete Profile Mandatory Warning Dialog ── */}
+      <Dialog
+        open={Boolean(profileIncompleteModal?.open)}
+        onClose={() => setProfileIncompleteModal({ open: false, missingFields: [] })}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: '24px',
+            bgcolor: colors.surface,
+            p: 1,
+            boxShadow: '0 25px 70px rgba(15, 23, 42, 0.35)',
+            border: `1px solid ${colors.border}`,
+          },
+        }}
+      >
+        <Box
+          sx={{
+            p: { xs: 2.5, sm: 3 },
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+          }}
+        >
+          {/* Badge Icon */}
+          <Box
+            sx={{
+              width: 64,
+              height: 64,
+              borderRadius: '50%',
+              bgcolor: '#FFF7ED',
+              border: '2px solid #FED7AA',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              mb: 2,
+            }}
+          >
+            <SchoolIcon sx={{ fontSize: 32, color: '#EA580C' }} />
+          </Box>
+
+          <Typography variant="h6" sx={{ fontWeight: 850, color: colors.textPrimary, mb: 1, fontSize: '1.2rem' }}>
+            Profile Details Required
+          </Typography>
+
+          <Typography variant="body2" sx={{ color: colors.textSecondary, mb: 2.5, px: 1, lineHeight: 1.55 }}>
+            Please fill in these profile fields, as this information may be included on your <strong>webinar completion</strong> certificate.
+          </Typography>
+
+          {/* Missing fields list container */}
+          <Box
+            sx={{
+              width: '100%',
+              bgcolor: isDark ? 'rgba(255, 255, 255, 0.03)' : '#F8FAFC',
+              border: `1px solid ${colors.border}`,
+              borderRadius: '16px',
+              p: 2,
+              mb: 3,
+            }}
+          >
+            <Typography
+              variant="caption"
+              sx={{
+                fontWeight: 700,
+                color: colors.textSecondary,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                display: 'block',
+                textAlign: 'left',
+                mb: 1.25,
+              }}
+            >
+              Missing Profile Details:
+            </Typography>
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {profileIncompleteModal?.missingFields?.map((field) => (
+                <Box
+                  key={field}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    bgcolor: isDark ? 'rgba(234, 88, 12, 0.08)' : '#FFF7ED',
+                    border: '1px solid #FED7AA',
+                    borderRadius: '10px',
+                    px: 1.75,
+                    py: 0.9,
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: colors.textPrimary }}>
+                    {field}
+                  </Typography>
+                  <Chip
+                    label="Required"
+                    size="small"
+                    sx={{
+                      height: 22,
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      bgcolor: '#EA580C',
+                      color: '#FFFFFF',
+                      borderRadius: '6px',
+                    }}
+                  />
+                </Box>
+              ))}
+            </Box>
+          </Box>
+
+          {/* Action Buttons */}
+          <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={() => {
+                setProfileIncompleteModal({ open: false, missingFields: [] });
+                navigate('/dashboard/profile');
+              }}
+              endIcon={<ArrowForwardIcon sx={{ fontSize: 18 }} />}
+              sx={{
+                py: 1.35,
+                borderRadius: '12px',
+                bgcolor: '#EA580C',
+                color: '#FFFFFF',
+                fontWeight: 800,
+                fontSize: '15px',
+                textTransform: 'none',
+                boxShadow: '0 8px 20px -4px rgba(234, 88, 12, 0.4)',
+                '&:hover': { bgcolor: '#C2410C' },
+              }}
+            >
+              Update Profile Now
+            </Button>
+
+            <Button
+              fullWidth
+              variant="text"
+              onClick={() => setProfileIncompleteModal({ open: false, missingFields: [] })}
+              sx={{
+                py: 1,
+                color: colors.textSecondary,
+                fontWeight: 600,
+                textTransform: 'none',
+                '&:hover': { bgcolor: 'transparent', color: colors.textPrimary },
+              }}
+            >
+              Cancel
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
     </Box>
   );
 }

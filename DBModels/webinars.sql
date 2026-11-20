@@ -965,7 +965,7 @@ BEGIN
     -- Check if already registered
     IF EXISTS (SELECT 1 FROM wms.WebinarRegistrations WHERE WebinarId = @WebinarId AND UserId = @UserId)
     BEGIN
-        SELECT 1 AS Success, 'You are already registered for this webinar.' AS Message, (SELECT WebinarName FROM wms.Webinars WHERE Id = @WebinarId) AS WebinarName;
+        SELECT 0 AS Success, 'You are already registered for this webinar.' AS Message, (SELECT WebinarName FROM wms.Webinars WHERE Id = @WebinarId) AS WebinarName;
         RETURN;
     END
 
@@ -1028,6 +1028,35 @@ BEGIN
         -- Insert permanent registration with CustomUserId
         INSERT INTO wms.WebinarRegistrations (WebinarId, UserId, CustomUserId, CreatedDateTime)
         VALUES (@WebinarId, @UserId, @CustomUserId, SYSUTCDATETIME());
+
+        DECLARE @NewRegId BIGINT = SCOPE_IDENTITY();
+
+        -- Check if attendee meeting join link exists for this registration/webinar
+        DECLARE @AttendeeJoinLink NVARCHAR(2000) = NULL;
+        SELECT TOP 1 @AttendeeJoinLink = aml.JoinLink
+        FROM wms.AttendeeMeetingLinks aml
+        WHERE aml.WebinarRegistrationId = @NewRegId;
+
+        IF @AttendeeJoinLink IS NULL
+        BEGIN
+            SELECT TOP 1 @AttendeeJoinLink = aml.JoinLink
+            FROM wms.AttendeeMeetingLinks aml
+            INNER JOIN wms.WebinarRegistrations wr ON wr.Id = aml.WebinarRegistrationId
+            WHERE wr.WebinarId = @WebinarId AND wr.UserId = @UserId;
+        END
+
+        -- Queue Registration Confirmation Email in wms.EmailQueue (idempotent)
+        IF NOT EXISTS (
+            SELECT 1 
+            FROM wms.EmailQueue eq 
+            WHERE eq.WebinarId = @WebinarId 
+              AND eq.UserId = @UserId 
+              AND eq.EmailType = 'REGISTRATION_CONFIRMATION'
+        )
+        BEGIN
+            INSERT INTO wms.EmailQueue (WebinarId, UserId, EmailType, JoinLink, IsSent, TimeSent, CreatedAt)
+            VALUES (@WebinarId, @UserId, 'REGISTRATION_CONFIRMATION', @AttendeeJoinLink, NULL, 0, SYSUTCDATETIME());
+        END
 
         COMMIT TRANSACTION;
         SELECT 1 AS Success, 'Successfully registered for webinar!' AS Message, @WName AS WebinarName;

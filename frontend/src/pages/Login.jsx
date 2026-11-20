@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams, useLocation } from "react-router-dom";
 import {
   Box, Typography, TextField, Button,
   Paper, InputAdornment, Container, IconButton, Divider
@@ -86,6 +86,23 @@ const inputStyle = {
 const Login = () => {
   const navigate  = useNavigate();
   const { login } = useAuth();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+
+  // Safely parse redirect target (prevents Open Redirect attacks)
+  const getSafeRedirect = (roleId) => {
+    if (roleId !== 3) return getHomeRoute(roleId);
+    const redirectCandidate = searchParams.get("redirect") || location.state?.from?.pathname || location.state?.from;
+    if (
+      typeof redirectCandidate === "string" &&
+      redirectCandidate.startsWith("/") &&
+      !redirectCandidate.startsWith("//") &&
+      !redirectCandidate.includes("\\")
+    ) {
+      return redirectCandidate;
+    }
+    return getHomeRoute(roleId);
+  };
 
   const [email, setEmail]               = useState("");
   const [password, setPassword]         = useState("");
@@ -135,7 +152,7 @@ const Login = () => {
         login(minUser, token, tabs);
         toast.success(`Welcome back, ${userData.firstName}`);
 
-        navigate(getHomeRoute(userData.roleId), { replace: true });
+        navigate(getSafeRedirect(userData.roleId), { replace: true });
       } else {
         setError(response.data.message || "Login failed");
       }
@@ -174,7 +191,7 @@ const Login = () => {
         login(minUser, token, tabs);
         toast.success(`Welcome, ${userData.firstName}!`);
 
-        navigate(getHomeRoute(userData.roleId), { replace: true });
+        navigate(getSafeRedirect(userData.roleId), { replace: true });
       } else {
         setError(response.data.message || "Google login failed");
       }
@@ -298,7 +315,14 @@ const Login = () => {
 
               <Typography sx={{ mt: 5, fontSize: "14px", color: colors.textSecondary }}>
                 Don't have an account?{" "}
-                <Link to="/signup" style={{ textDecoration: "none" }}>
+                <Link
+                  to={
+                    searchParams.get("redirect")
+                      ? `/signup?redirect=${encodeURIComponent(searchParams.get("redirect"))}`
+                      : "/signup"
+                  }
+                  style={{ textDecoration: "none" }}
+                >
                   <span style={{ color: colors.accent, fontWeight: 700, cursor: "pointer" }}>
                     Sign up
                   </span>

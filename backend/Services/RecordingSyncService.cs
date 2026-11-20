@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -18,6 +19,7 @@ namespace WebinarApi.Services;
 // -------------------------------------------------------
 public class RecordingSyncService : BackgroundService
 {
+    private static readonly ConcurrentDictionary<string, byte> _activeTranscriptionJobs = new();
     private readonly IConfiguration _config;
     private readonly ILogger<RecordingSyncService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -106,40 +108,41 @@ public class RecordingSyncService : BackgroundService
             commandType: CommandType.StoredProcedure
         )).ToList();
 
-        if (pending.Count == 0)
+        if (pending.Count > 0)
         {
-            return;
+            LogBoth($"[RecordingSyncService] 🔍 Found {pending.Count} pending recording(s) to verify with BigBlueButton.");
+
+            var nowUtc = DateTime.UtcNow;
+
+            foreach (var item in pending)
+            {
+                if (stoppingToken.IsCancellationRequested) break;
+
+                // Check if recording exceeded max polling age (e.g. 24 hours)
+                if ((nowUtc - item.CreatedAt) > TimeSpan.FromHours(_maxHoursToPoll))
+                {
+                    LogWarnBoth($"[RecordingSyncService] ⏰ Recording for Meeting '{item.MeetingIDString}' (RecordId: {item.RecordId}) exceeded {_maxHoursToPoll}h. Marking NO_RECORDING.");
+                    await conn.ExecuteAsync(
+                        "wms.usp_MarkRecordingStatus",
+                        new { RecordId = item.RecordId, Status = "NO_RECORDING" },
+                        commandType: CommandType.StoredProcedure
+                    );
+                    continue;
+                }
+
+                try
+                {
+                    await ProcessSingleRecordingAsync(item, conn, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    LogWarnBoth($"[RecordingSyncService] ⚠️ Exception processing RecordId '{item.RecordId}': {ex.Message}");
+                }
+            }
         }
 
-        LogBoth($"[RecordingSyncService] 🔍 Found {pending.Count} pending recording(s) to verify with BigBlueButton.");
-
-        var nowUtc = DateTime.UtcNow;
-
-        foreach (var item in pending)
-        {
-            if (stoppingToken.IsCancellationRequested) break;
-
-            // Check if recording exceeded max polling age (e.g. 24 hours)
-            if ((nowUtc - item.CreatedAt) > TimeSpan.FromHours(_maxHoursToPoll))
-            {
-                LogWarnBoth($"[RecordingSyncService] ⏰ Recording for Meeting '{item.MeetingIDString}' (RecordId: {item.RecordId}) exceeded {_maxHoursToPoll}h. Marking NO_RECORDING.");
-                await conn.ExecuteAsync(
-                    "wms.usp_MarkRecordingStatus",
-                    new { RecordId = item.RecordId, Status = "NO_RECORDING" },
-                    commandType: CommandType.StoredProcedure
-                );
-                continue;
-            }
-
-            try
-            {
-                await ProcessSingleRecordingAsync(item, conn, stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                LogWarnBoth($"[RecordingSyncService] ⚠️ Exception processing RecordId '{item.RecordId}': {ex.Message}");
-            }
-        }
+        // Flexible barrier sweep: check any uncompleted webinars whose meeting/recording already finished
+        await SweepUncompletedEndedWebinarsAsync(conn, stoppingToken);
     }
 
     private async Task ProcessSingleRecordingAsync(
@@ -150,6 +153,33 @@ public class RecordingSyncService : BackgroundService
         // 0. If in WAITING_FOR_END state, verify if BBB session has finished running
         if (string.Equals(item.Status, "WAITING_FOR_END", StringComparison.OrdinalIgnoreCase))
         {
+            // Only check if current time is strictly greater than the webinar's scheduled EndTime
+            var nowUtc = DateTime.UtcNow;
+            DateTime endTimeUtc;
+
+            if (item.EndTime.HasValue)
+            {
+                endTimeUtc = DateTime.SpecifyKind(item.EndTime.Value, DateTimeKind.Utc);
+            }
+            else
+            {
+                var webinarEndTime = await conn.ExecuteScalarAsync<DateTime?>(
+                    "SELECT EndTime FROM wms.Webinars WHERE Id = @WebinarId",
+                    new { WebinarId = item.WebinarId }
+                );
+                endTimeUtc = webinarEndTime.HasValue
+                    ? DateTime.SpecifyKind(webinarEndTime.Value, DateTimeKind.Utc)
+                    : DateTime.MaxValue;
+            }
+
+            // If current time has not yet passed EndTime, the webinar is still upcoming or in progress!
+            if (nowUtc <= endTimeUtc)
+            {
+                LogBoth($"[RecordingSyncService] ⏳ Webinar {item.WebinarId} has not reached EndTime yet (Now UTC: {nowUtc:yyyy-MM-dd HH:mm:ss} <= EndTime UTC: {endTimeUtc:yyyy-MM-dd HH:mm:ss}). Keeping 'WAITING_FOR_END'.");
+                return;
+            }
+
+            // Current Time > EndTime has passed! Now verify with BBB if session is still running (e.g. overtime Q&A)
             var isRunningApi = _getRecordingsApi.EndsWith("/getRecordings", StringComparison.OrdinalIgnoreCase)
                 ? _getRecordingsApi[..^"/getRecordings".Length] + "/isMeetingRunning"
                 : _getRecordingsApi;
@@ -170,21 +200,29 @@ public class RecordingSyncService : BackgroundService
                 var runDoc = XDocument.Parse(runXml);
                 var isRunning = string.Equals(runDoc.Root?.Element("running")?.Value?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
 
-                if (!isRunning)
+                if (isRunning)
                 {
-                    LogBoth($"[RecordingSyncService] 🛑 Meeting '{item.MeetingIDString}' has ENDED on BBB. Transitioning Status to 'PROCESSING'...");
-                    await conn.ExecuteAsync(
-                        "wms.usp_MarkRecordingProcessing",
-                        new { MeetingIDString = item.MeetingIDString },
-                        commandType: CommandType.StoredProcedure
-                    );
-                    item.Status = "PROCESSING";
-                }
-                else
-                {
-                    LogBoth($"[RecordingSyncService] ⏳ Meeting '{item.MeetingIDString}' is still ACTIVE on BBB. Keeping 'WAITING_FOR_END'.");
+                    // BBB is still running! Moderator/speaker is running overtime. Wait for next polling window!
+                    LogBoth($"[RecordingSyncService] ⏳ Meeting '{item.MeetingIDString}' is still ACTIVE on BBB after EndTime (overtime Q&A). Keeping 'WAITING_FOR_END' for next window.");
                     return;
                 }
+
+                // BBB is NOT running (running == false) AND Current Time > EndTime: Meeting has truly ended!
+                LogBoth($"[RecordingSyncService] 🛑 Meeting '{item.MeetingIDString}' has ENDED on BBB (Now > EndTime and BBB running == false). Transitioning Status to 'PROCESSING'...");
+                await conn.ExecuteAsync(
+                    "wms.usp_MarkRecordingProcessing",
+                    new { MeetingIDString = item.MeetingIDString },
+                    commandType: CommandType.StoredProcedure
+                );
+                item.Status = "PROCESSING";
+
+                // Flexible barrier: if attendance not yet recorded, complete it now!
+                await EnsureWebinarCompletedIfEndedAsync(item.WebinarId, item.MeetingIDString, conn);
+            }
+            else
+            {
+                LogBoth($"[RecordingSyncService] ⚠️ BBB isMeetingRunning returned HTTP {runningResp.StatusCode} for '{item.MeetingIDString}'. Keeping 'WAITING_FOR_END'.");
+                return;
             }
         }
 
@@ -255,11 +293,8 @@ public class RecordingSyncService : BackgroundService
 
             LogBoth($"[RecordingSyncService] ✅ Successfully saved video to '{downloadSuccess.relativeFilePath}' ({downloadSuccess.fileSize} bytes). Status updated to DOWNLOADED.");
 
-            // Immediately trigger transcription for this newly downloaded recording
-            _ = Task.Run(async () =>
-            {
-                await TriggerSingleTranscriptionAsync(item.RecordId, downloadSuccess.relativeFilePath, stoppingToken);
-            }, stoppingToken);
+            // Sequentially trigger transcription for this newly downloaded recording
+            await TriggerSingleTranscriptionAsync(item.RecordId, downloadSuccess.relativeFilePath, stoppingToken);
         }
         else
         {
@@ -332,6 +367,26 @@ public class RecordingSyncService : BackgroundService
         {
             using var conn = new SqlConnection(_connectionString);
 
+            // Self-healing: If any recording is already transcribed, ensure TranscriptStatus is COMPLETED
+            await conn.ExecuteAsync(
+                @"UPDATE wms.WebinarRecordings
+                  SET TranscriptStatus = 'COMPLETED',
+                      UpdatedAt = SYSUTCDATETIME()
+                  WHERE IsTranscribed = 1 
+                    AND TranscriptFilePath IS NOT NULL 
+                    AND TranscriptStatus <> 'COMPLETED'"
+            );
+
+            // Self-healing: Reset stale IN_PROGRESS jobs (e.g. from previous server restart/freeze) back to NOT_STARTED
+            await conn.ExecuteAsync(
+                @"UPDATE wms.WebinarRecordings
+                  SET TranscriptStatus = 'NOT_STARTED',
+                      UpdatedAt = SYSUTCDATETIME()
+                  WHERE IsTranscribed = 0
+                    AND TranscriptStatus = 'IN_PROGRESS'
+                    AND UpdatedAt < DATEADD(MINUTE, -5, SYSUTCDATETIME())"
+            );
+
             var pending = (await conn.QueryAsync<PendingTranscriptionDto>(
                 "wms.usp_GetPendingTranscriptions",
                 commandType: CommandType.StoredProcedure
@@ -360,18 +415,47 @@ public class RecordingSyncService : BackgroundService
         string localFilePath,
         CancellationToken stoppingToken)
     {
+        // 1. In-memory concurrency guard: Only 1 worker can process a RecordId at a time in this instance
+        if (!_activeTranscriptionJobs.TryAdd(recordId, 0))
+        {
+            LogBoth($"[RecordingSyncService] ℹ️ RecordId '{recordId}' is currently being transcribed by another active worker. Skipping duplicate spawn.");
+            return;
+        }
+
         try
         {
             using var conn = new SqlConnection(_connectionString);
 
-            LogBoth($"[RecordingSyncService] ⏳ Starting Whisper transcription for RecordId '{recordId}' (File: '{localFilePath}')...");
-
-            // Update status to IN_PROGRESS so subsequent ticks skip this item
-            await conn.ExecuteAsync(
-                "wms.usp_MarkRecordingTranscriptStatus",
-                new { RecordId = recordId, TranscriptStatus = "IN_PROGRESS" },
-                commandType: CommandType.StoredProcedure
+            // 2. Check if already completed in DB
+            var existingStatus = await conn.QueryFirstOrDefaultAsync<(bool IsTranscribed, string? TranscriptStatus)>(
+                "SELECT IsTranscribed, TranscriptStatus FROM wms.WebinarRecordings WHERE RecordId = @RecordId",
+                new { RecordId = recordId }
             );
+
+            if (existingStatus.IsTranscribed || string.Equals(existingStatus.TranscriptStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase))
+            {
+                LogBoth($"[RecordingSyncService] ℹ️ RecordId '{recordId}' is already COMPLETED. Skipping duplicate transcription.");
+                return;
+            }
+
+            // 3. Atomic SQL job claim: Transition to IN_PROGRESS only if still NOT_STARTED or PENDING
+            var claimed = await conn.ExecuteAsync(
+                @"UPDATE wms.WebinarRecordings
+                  SET TranscriptStatus = 'IN_PROGRESS',
+                      UpdatedAt = SYSUTCDATETIME()
+                  WHERE RecordId = @RecordId
+                    AND IsTranscribed = 0
+                    AND (TranscriptStatus IN ('NOT_STARTED', 'PENDING') OR TranscriptStatus IS NULL)",
+                new { RecordId = recordId }
+            );
+
+            if (claimed == 0)
+            {
+                LogBoth($"[RecordingSyncService] ℹ️ RecordId '{recordId}' was already claimed or updated by another worker. Skipping.");
+                return;
+            }
+
+            LogBoth($"[RecordingSyncService] ⏳ Starting Whisper transcription for RecordId '{recordId}' (File: '{localFilePath}')...");
 
             using var scope = _scopeFactory.CreateScope();
             var transcriber = scope.ServiceProvider.GetRequiredService<ITranscriptionService>();
@@ -390,17 +474,92 @@ public class RecordingSyncService : BackgroundService
             }
             else
             {
-                LogWarnBoth($"[RecordingSyncService] ⚠️ Transcription failed for '{recordId}': {message}. Resetting status to NOT_STARTED for retry.");
+                LogWarnBoth($"[RecordingSyncService] ⚠️ Transcription failed for '{recordId}': {message}. Checking status before reset...");
+
+                // 4. Safe failure reset: NEVER reset if already transcribed or completed
                 await conn.ExecuteAsync(
-                    "wms.usp_MarkRecordingTranscriptStatus",
-                    new { RecordId = recordId, TranscriptStatus = "NOT_STARTED" },
-                    commandType: CommandType.StoredProcedure
+                    @"UPDATE wms.WebinarRecordings
+                      SET TranscriptStatus = 'NOT_STARTED',
+                          UpdatedAt = SYSUTCDATETIME()
+                      WHERE RecordId = @RecordId
+                        AND IsTranscribed = 0
+                        AND TranscriptStatus <> 'COMPLETED'",
+                    new { RecordId = recordId }
                 );
             }
         }
         catch (Exception ex)
         {
             LogWarnBoth($"[RecordingSyncService] ❌ Exception in TriggerSingleTranscriptionAsync for '{recordId}': {ex.Message}");
+        }
+        finally
+        {
+            _activeTranscriptionJobs.TryRemove(recordId, out _);
+        }
+    }
+
+    private async Task EnsureWebinarCompletedIfEndedAsync(long webinarId, string meetingId, SqlConnection conn)
+    {
+        try
+        {
+            // Barrier: Check if webinar already has completed student records OR is already marked IsCompleted = 1
+            var isAlreadyCompleted = await conn.ExecuteScalarAsync<bool>(
+                @"SELECT CASE 
+                    WHEN EXISTS (
+                        SELECT 1 FROM wms.WebinarCompleted wc 
+                        JOIN wms.WebinarRegistrations wr ON wr.Id = wc.WebinarRegisterId 
+                        WHERE wr.WebinarId = @WebinarId
+                    ) OR EXISTS (
+                        SELECT 1 FROM wms.Webinars WHERE Id = @WebinarId AND IsCompleted = 1
+                    ) THEN 1 ELSE 0 END",
+                new { WebinarId = webinarId }
+            );
+
+            if (isAlreadyCompleted)
+            {
+                LogBoth($"[RecordingSyncService] ℹ️ Webinar {webinarId} already has completion records or IsCompleted = 1. Skipping duplicate completion.");
+                return;
+            }
+
+            LogBoth($"[RecordingSyncService] ⚡ Meeting '{meetingId}' (Webinar {webinarId}) ended on BBB but attendance not yet recorded in WebinarCompleted. Completing now...");
+
+            using var scope = _scopeFactory.CreateScope();
+            var meetingService = scope.ServiceProvider.GetRequiredService<IMeetingService>();
+            var (success, msg, count) = await meetingService.ProcessMeetingEndedAsync(meetingId, null);
+
+            LogBoth($"[RecordingSyncService] ✅ Attendance processed for Webinar {webinarId}. Recorded {count} student(s). Message: {msg}");
+        }
+        catch (Exception ex)
+        {
+            LogWarnBoth($"[RecordingSyncService] ⚠️ Non-fatal error completing Webinar {webinarId}: {ex.Message}");
+        }
+    }
+
+    private async Task SweepUncompletedEndedWebinarsAsync(SqlConnection conn, CancellationToken stoppingToken)
+    {
+        try
+        {
+            // Find any uncompleted webinars where recording has already downloaded, transcribed, or completed
+            var uncompletedList = (await conn.QueryAsync<(long WebinarId, string MeetingID)>(
+                @"SELECT DISTINCT w.Id AS WebinarId, m.MeetingID
+                  FROM wms.Webinars w
+                  JOIN wms.Meetings m ON m.WebinarId = w.Id
+                  JOIN wms.WebinarRecordings wr ON wr.WebinarId = w.Id
+                  WHERE w.IsCompleted = 0 
+                    AND w.EndTime <= SYSUTCDATETIME()
+                    AND wr.Status IN ('COMPLETED', 'PROCESSING', 'DOWNLOADED')
+                    AND m.MeetingID IS NOT NULL"
+            )).ToList();
+
+            foreach (var item in uncompletedList)
+            {
+                if (stoppingToken.IsCancellationRequested) break;
+                await EnsureWebinarCompletedIfEndedAsync(item.WebinarId, item.MeetingID, conn);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogWarnBoth($"[RecordingSyncService] ⚠️ Error in SweepUncompletedEndedWebinarsAsync: {ex.Message}");
         }
     }
 

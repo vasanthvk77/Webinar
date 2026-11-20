@@ -50,6 +50,14 @@ public class ScheduleMeetingRequest
     [StringLength(50)]
     public string? LockSettingsPresenterPolicy { get; set; } = "default";
 
+    public bool LockSettingsDisableMic { get; set; } = false;
+
+    public bool LockSettingsDisableCam { get; set; } = false;
+
+    public bool LockSettingsDisablePrivateChat { get; set; } = false;
+
+    public bool WebcamsOnlyForModerator { get; set; } = false;
+
     [StringLength(50)]
     public string? ModeratorPW { get; set; }
 
@@ -79,6 +87,10 @@ public class MeetingDto
     public bool MuteOnStart { get; set; }
     public string MeetingLayout { get; set; } = "UNIFIED_LAYOUT";
     public string? LockSettingsPresenterPolicy { get; set; }
+    public bool LockSettingsDisableMic { get; set; }
+    public bool LockSettingsDisableCam { get; set; }
+    public bool LockSettingsDisablePrivateChat { get; set; }
+    public bool WebcamsOnlyForModerator { get; set; }
     public string? ModeratorPW { get; set; }
     public string? AttendeePW { get; set; }
     public string? ModeratorJoinUrl { get; set; }
@@ -113,6 +125,10 @@ public class PendingMeetingScheduleDto
     public bool MuteOnStart { get; set; }
     public string MeetingLayout { get; set; } = "UNIFIED_LAYOUT";
     public string? LockSettingsPresenterPolicy { get; set; }
+    public bool LockSettingsDisableMic { get; set; }
+    public bool LockSettingsDisableCam { get; set; }
+    public bool LockSettingsDisablePrivateChat { get; set; }
+    public bool WebcamsOnlyForModerator { get; set; }
     public string? ModeratorPW { get; set; }
     public string? AttendeePW { get; set; }
     public string? ModeratorJoinUrl { get; set; }
@@ -154,6 +170,7 @@ public class PendingRecordingDto
     public string MeetingIDString { get; set; } = string.Empty;
     public string RecordId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public DateTime? EndTime { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 

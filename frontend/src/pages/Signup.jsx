@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import {
   Box, Typography, TextField, Button,
   Paper, InputAdornment, Container, IconButton, Divider,
@@ -15,11 +15,26 @@ import logo from "../assets/logo1.png";
 const Signup = ({ mode }) => {
   const isDark = mode === "dark";
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Safely parse redirect target (prevents Open Redirect attacks)
+  const getSafeRedirect = () => {
+    const redirectCandidate = searchParams.get("redirect");
+    if (
+      typeof redirectCandidate === "string" &&
+      redirectCandidate.startsWith("/") &&
+      !redirectCandidate.startsWith("//") &&
+      !redirectCandidate.includes("\\")
+    ) {
+      return redirectCandidate;
+    }
+    return "/dashboard";
+  };
 
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
-    email: "",
+    email: searchParams.get("email") || "",
     password: "",
     countryCode: "+1",
     mobileNumber: ""
@@ -202,7 +217,7 @@ const Signup = ({ mode }) => {
         localStorage.setItem("user", JSON.stringify(response.data.user));
         localStorage.setItem("firstName", response.data.user.firstName);
         showSnackbar("Registration successful!", "success");
-        navigate("/dashboard");
+        navigate(getSafeRedirect(), { replace: true });
       } else {
         showSnackbar(response.data.message || "Registration failed", "error");
       }
@@ -223,7 +238,7 @@ const Signup = ({ mode }) => {
         localStorage.setItem("user", JSON.stringify(response.data.user));
         localStorage.setItem("firstName", response.data.user.firstName);
         showSnackbar(`Welcome, ${response.data.user.firstName}!`, "success");
-        navigate("/dashboard");
+        navigate(getSafeRedirect(), { replace: true });
       } else {
         showSnackbar(response.data.message || "Google signup failed", "error");
       }
@@ -619,7 +634,14 @@ const Signup = ({ mode }) => {
             {/* Login Link */}
             <Typography sx={{ fontSize: "14px", color: isDark ? "#94a3b8" : "#475569" }}>
               Already have an account?{" "}
-              <Link to="/login" style={{ textDecoration: "none" }}>
+              <Link
+                to={
+                  searchParams.get("redirect")
+                    ? `/login?redirect=${encodeURIComponent(searchParams.get("redirect"))}`
+                    : "/login"
+                }
+                style={{ textDecoration: "none" }}
+              >
                 <span style={{ color: isDark ? "#60a5fa" : "#2563eb", cursor: "pointer", fontWeight: 600 }}>
                   Sign in
                 </span>

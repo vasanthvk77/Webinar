@@ -22,6 +22,7 @@ namespace WebinarApi.Services
         private readonly string                               _frontendUrl;
         private readonly string                               _templatePath;
         private readonly string                               _joinLinkTemplatePath;
+        private readonly string                               _regConfirmTemplatePath;
 
         public EmailQueueBackgroundService(
             IServiceProvider serviceProvider,
@@ -41,8 +42,9 @@ namespace WebinarApi.Services
                               ? frontendArray[0].TrimEnd('/')
                               : "http://localhost:5173";
 
-            _templatePath         = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "StudentWebinrNotification.html");
-            _joinLinkTemplatePath = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "MeetingInviteLinkNotification.html");
+            _templatePath           = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "StudentWebinrNotification.html");
+            _joinLinkTemplatePath   = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "MeetingInviteLinkNotification.html");
+            _regConfirmTemplatePath = Path.Combine(Directory.GetCurrentDirectory(), "EmailTemplete", "RegistrationConfirmationNotification.html");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -122,6 +124,16 @@ namespace WebinarApi.Services
                 _logger.LogWarning("[EmailQueueBackgroundService] Meeting join link email template not found at {Path}, using fallback.", _joinLinkTemplatePath);
             }
 
+            string regConfirmTemplateContent = "";
+            if (File.Exists(_regConfirmTemplatePath))
+            {
+                regConfirmTemplateContent = await File.ReadAllTextAsync(_regConfirmTemplatePath, stoppingToken);
+            }
+            else
+            {
+                _logger.LogWarning("[EmailQueueBackgroundService] Registration confirmation email template not found at {Path}, using fallback.", _regConfirmTemplatePath);
+            }
+
             // Read SMTP configuration
             string smtpHost     = _config["Smtp:Host"] ?? "";
             int    smtpPort     = int.TryParse(_config["Smtp:Port"], out var p) ? p : 587;
@@ -168,6 +180,7 @@ namespace WebinarApi.Services
 
                     bool isJoinLinkEmail = string.Equals(item.EmailType, "MEETING_JOIN_LINK", StringComparison.OrdinalIgnoreCase);
                     bool isAdminAlertEmail = string.Equals(item.EmailType, "ADMIN_UNSCHEDULED_MEETING_ALERT", StringComparison.OrdinalIgnoreCase);
+                    bool isRegConfirmEmail = string.Equals(item.EmailType, "REGISTRATION_CONFIRMATION", StringComparison.OrdinalIgnoreCase);
 
                     string emailSubject;
                     string emailBody;
@@ -185,6 +198,31 @@ namespace WebinarApi.Services
                         // Meeting Join Link Notification with explicit local start time
                         emailSubject = $"Live Session Access Link: {item.WebinarName} (Starts at {subjectTime})";
                         emailBody = FormatJoinLinkEmailTemplate(joinLinkTemplateContent, item, timeFormatted, dateFormatted);
+                    }
+                    else if (isRegConfirmEmail)
+                    {
+                        // Check if attendee join link exists or was created in the meantime
+                        if (string.IsNullOrWhiteSpace(item.JoinLink))
+                        {
+                            try
+                            {
+                                var liveLink = await conn.ExecuteScalarAsync<string>(
+                                    @"SELECT TOP 1 aml.JoinLink 
+                                      FROM wms.AttendeeMeetingLinks aml 
+                                      INNER JOIN wms.WebinarRegistrations wr ON wr.Id = aml.WebinarRegistrationId 
+                                      WHERE wr.WebinarId = @WebinarId AND wr.UserId = @UserId",
+                                    new { WebinarId = item.WebinarId, UserId = item.UserId }
+                                );
+                                if (!string.IsNullOrWhiteSpace(liveLink))
+                                {
+                                    item.JoinLink = liveLink;
+                                }
+                            }
+                            catch { }
+                        }
+
+                        emailSubject = $"Confirmed: You are registered for {item.WebinarName}!";
+                        emailBody = FormatRegistrationConfirmationTemplate(regConfirmTemplateContent, item, _frontendUrl, timeFormatted, dateFormatted);
                     }
                     else
                     {
@@ -332,6 +370,70 @@ namespace WebinarApi.Services
                 .Replace("{{ConductorName}}", item.ConductorName)
                 .Replace("{{JoinMeetingUrl}}", joinUrl)
                 .Replace("{{JoinLink}}", joinUrl);
+        }
+
+        private static string FormatRegistrationConfirmationTemplate(
+            string template,
+            EmailQueueItemDto item,
+            string frontendUrl,
+            string timeFormatted,
+            string dateFormatted)
+        {
+            string studentName = $"{item.RecipientFirstName} {item.RecipientLastName}".Trim();
+            if (string.IsNullOrWhiteSpace(studentName)) studentName = "Student";
+
+            string dashboardUrl = $"{frontendUrl}/dashboard/webinars?tab=registered";
+            string priceText = item.IsPaid ? $"₹{item.Price}" : "FREE";
+            string priceClass = item.IsPaid ? "badge-paid" : "badge-free";
+
+            string meetingLinkSection;
+            if (!string.IsNullOrWhiteSpace(item.JoinLink))
+            {
+                meetingLinkSection = $@"
+                    <div class=""join-box"">
+                        <div class=""join-box-title"">🚀 Your Live Session Join Link is Ready!</div>
+                        <p class=""join-box-desc"">The meeting room has been scheduled. You can join the webinar directly with the button below:</p>
+                        <div class=""btn-wrapper"">
+                            <a href=""{item.JoinLink}"" class=""btn-join"" target=""_blank"">Join Live Webinar Now</a>
+                        </div>
+                    </div>";
+            }
+            else
+            {
+                meetingLinkSection = @"
+                    <div class=""pending-box"">
+                        
+                        <div class=""pending-title"">Meeting Room Status</div>
+                        <p class=""pending-desc"">You will receive the meeting link soon before the session starts. You can also view it anytime from your Student Portal.</p>
+                    </div>";
+            }
+
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                return $@"
+                    <h2>Registration Confirmed for {item.WebinarName}!</h2>
+                    <p>Hi {studentName},</p>
+                    <p>Date: {dateFormatted}</p>
+                    <p>Time: {timeFormatted} ({item.DurationMinutes} min)</p>
+                    <p>Speaker: {item.ConductorName}</p>
+                    {meetingLinkSection}
+                    <p><a href='{dashboardUrl}'>Go to My Webinars</a></p>
+                ";
+            }
+
+            return template
+                .Replace("{{StudentName}}", studentName)
+                .Replace("{{WebinarTitle}}", item.WebinarName)
+                .Replace("{{Category}}", item.CategoryName)
+                .Replace("{{PriceBadgeClass}}", priceClass)
+                .Replace("{{PriceText}}", priceText)
+                .Replace("{{Date}}", dateFormatted)
+                .Replace("{{Time}}", timeFormatted)
+                .Replace("{{Duration}}", $"{item.DurationMinutes} min")
+                .Replace("{{ConductorName}}", item.ConductorName)
+                .Replace("{{DashboardUrl}}", dashboardUrl)
+                .Replace("{{JoinMeetingUrl}}", !string.IsNullOrWhiteSpace(item.JoinLink) ? item.JoinLink : dashboardUrl)
+                .Replace("{{MeetingLinkSection}}", meetingLinkSection);
         }
 
         private static string FormatAdminAlertEmailTemplate(EmailQueueItemDto item, string timeFormatted, string dateFormatted)

@@ -29,6 +29,7 @@ public class MeetingScheduleChecker : BackgroundService
     private readonly int _gracePeriodInMinutes;
     private readonly int _meetingEndCheckGracePeriod;
     private readonly int _adminAlertBufferMinutes;
+    private readonly int _graceParticipantCount;
 
     public MeetingScheduleChecker(
         IConfiguration config,
@@ -57,6 +58,11 @@ public class MeetingScheduleChecker : BackgroundService
         _gracePeriodInMinutes = config.GetValue<int>("MeetingScheduleChecker:GracePeriodInMinutes", 5);
         _meetingEndCheckGracePeriod = config.GetValue<int>("MeetingScheduleChecker:MeetingEndCheckGracePeriod", 30);
         _adminAlertBufferMinutes = config.GetValue<int>("MeetingScheduleChecker:AdminAlertBufferMinutesBeforeStart", 30);
+        _graceParticipantCount = config.GetValue<int?>("garceParticpantCount")
+                              ?? config.GetValue<int?>("graceParticipantCount")
+                              ?? config.GetValue<int?>("BBB:garceParticpantCount")
+                              ?? config.GetValue<int?>("BBB:GraceParticipantCount")
+                              ?? 5;
     }
 
     private void LogBoth(string message)
@@ -179,13 +185,17 @@ public class MeetingScheduleChecker : BackgroundService
     {
         try
         {
+            int bbbMaxParticipants = (meeting.TotalRegistrations > 0 ? meeting.TotalRegistrations : meeting.MaxParticipants) + _graceParticipantCount;
+            LogBoth($"[MeetingScheduleChecker] 👥 MaxParticipants for '{meeting.Name}' (MeetingID: {meeting.MeetingID}): Registrations={meeting.TotalRegistrations}, Grace={_graceParticipantCount} => BBB Max={bbbMaxParticipants}");
+
             // Build parameters required by BBB create call
             var parameters = new List<KeyValuePair<string, string>>
             {
                 new("name", meeting.Name),
                 new("meetingID", meeting.MeetingID),
-                new("maxParticipants", meeting.MaxParticipants.ToString()),
-                new("duration", meeting.Duration.ToString()),
+                new("maxParticipants", bbbMaxParticipants.ToString()),
+                // Pass duration=0 to BigBlueButton so it never auto-terminates the meeting due to timer expiration
+                new("duration", "0"),
                 new("record", meeting.Record ? "true" : "false"),
                 new("autoStartRecording", meeting.AutoStartRecording ? "true" : "false"),
                 new("allowStartStopRecording", meeting.AllowStartStopRecording ? "true" : "false"),
@@ -194,6 +204,10 @@ public class MeetingScheduleChecker : BackgroundService
                 new("endWhenNoModerator", meeting.EndWhenNoModerator ? "true" : "false"),
                 new("guestPolicy", meeting.GuestPolicy),
                 new("muteOnStart", meeting.MuteOnStart ? "true" : "false"),
+                new("lockSettingsDisableMic", meeting.LockSettingsDisableMic ? "true" : "false"),
+                new("lockSettingsDisableCam", meeting.LockSettingsDisableCam ? "true" : "false"),
+                new("lockSettingsDisablePrivateChat", meeting.LockSettingsDisablePrivateChat ? "true" : "false"),
+                new("webcamsOnlyForModerator", meeting.WebcamsOnlyForModerator ? "true" : "false"),
                 new("meetingLayout", meeting.MeetingLayout),
                 new("meta_webinarId", meeting.WebinarId.ToString())
             };

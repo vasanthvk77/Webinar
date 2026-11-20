@@ -25,14 +25,14 @@ namespace WebinarApi.Services
     public class AuthService : IAuthService
     {
         private readonly IConfiguration _config;
-        private readonly string         _connectionString;
+        private readonly string _connectionString;
         private readonly ILogger<AuthService> _logger;
-        private readonly IActivityLogService  _activityLog;
-        private readonly IEmailService        _emailService;
+        private readonly IActivityLogService _activityLog;
+        private readonly IEmailService _emailService;
 
         public AuthService(IConfiguration config, ILogger<AuthService> logger, IActivityLogService activityLog, IEmailService emailService)
         {
-            _config           = config;
+            _config = config;
             _connectionString = config.GetConnectionString("DefaultConnection")
                              ?? config["DatabaseConnectionString"]
                              ?? throw new InvalidOperationException("Connection string not configured.");
@@ -106,12 +106,12 @@ namespace WebinarApi.Services
                     "wms.usp_RegisterLocalUser",
                     new
                     {
-                        FirstName    = request.FirstName.Trim(),
-                        LastName     = request.LastName?.Trim() ?? "",
-                        Email        = email,
+                        FirstName = request.FirstName.Trim(),
+                        LastName = request.LastName?.Trim() ?? "",
+                        Email = email,
                         PasswordHash = hash,
-                        RoleId       = 3,       // Student (default)
-                        CountryCode  = request.CountryCode  ?? "",
+                        RoleId = 3,       // Student (default)
+                        CountryCode = request.CountryCode ?? "",
                         MobileNumber = request.MobileNumber ?? ""
                     },
                     commandType: CommandType.StoredProcedure
@@ -123,7 +123,7 @@ namespace WebinarApi.Services
                     return (false, "Failed to create account", null!, null!);
                 }
 
-                var dto      = MapToUserDto(user);
+                var dto = MapToUserDto(user);
                 var jwtToken = GenerateJwtToken(dto);
                 _logger.LogInformation("[Auth] Register SUCCESS — UserId: {UserId}, Email: {Email}, Role: {Role}",
                     (int)user.Id, (string)user.Email, (string)user.RoleName);
@@ -169,21 +169,20 @@ namespace WebinarApi.Services
                 }
 
                 string authProvider = (string)user.AuthProvider;
-                if (authProvider != "Local")
+                if (string.IsNullOrEmpty((string?)user.PasswordHash))
                 {
-                    _logger.LogWarning("[Auth] Login failed — {Email} is a {Provider} account, not Local.", email, authProvider);
-                    return (false, $"This account was registered via {authProvider}. Please use that login method.", null!, null!);
+                    _logger.LogWarning("[Auth] Login failed — {Email} has no password set (registered via {Provider}).", email, authProvider);
+                    return (false, $"This account was registered via {authProvider}. Please sign in with {authProvider} or reset your password.", null!, null!);
                 }
 
-                if (string.IsNullOrEmpty((string?)user.PasswordHash) ||
-                    !BCrypt.Net.BCrypt.Verify(request.Password, (string)user.PasswordHash))
+                if (!BCrypt.Net.BCrypt.Verify(request.Password, (string)user.PasswordHash))
                 {
                     _logger.LogWarning("[Auth] Login failed — wrong password for {Email}.", email);
                     return (false, "Invalid email or password", null!, null!);
                 }
 
-                UserDto dto      = MapToUserDto(user);
-                var     jwtToken = GenerateJwtToken(dto);
+                UserDto dto = MapToUserDto(user);
+                var jwtToken = GenerateJwtToken(dto);
                 _logger.LogInformation("[Auth] Login SUCCESS — UserId: {UserId}, Email: {Email}, Role: {Role}",
                     dto.Id, dto.Email, dto.RoleName);
                 await _activityLog.LogActivityAsync(dto.Id, $"{dto.FirstName} {dto.LastName}".Trim(), dto.RoleId, "LOGIN", "AUTH", $"User logged in: {dto.Email}");
@@ -212,7 +211,7 @@ namespace WebinarApi.Services
 
                 // Validate Google token
                 var clientId = _config["GoogleAuth:ClientId"];
-                var payload  = await GoogleJsonWebSignature.ValidateAsync(
+                var payload = await GoogleJsonWebSignature.ValidateAsync(
                     request.Token,
                     new GoogleJsonWebSignature.ValidationSettings
                     {
@@ -221,9 +220,9 @@ namespace WebinarApi.Services
                 );
 
                 var googleEmail = payload.Email?.ToLower().Trim();
-                var googleSub   = payload.Subject;
-                var firstName   = payload.GivenName ?? payload.Name ?? "User";
-                var lastName    = payload.FamilyName ?? "";
+                var googleSub = payload.Subject;
+                var firstName = payload.GivenName ?? payload.Name ?? "User";
+                var lastName = payload.FamilyName ?? "";
 
                 _logger.LogInformation("[Auth] Google token validated for email: {Email}", googleEmail);
 
@@ -251,15 +250,15 @@ namespace WebinarApi.Services
                         return (false, "Your account has been deactivated.", null!, null!);
                     }
 
-                    UserDto dto      = MapToUserDto(existingGoogle);
-                    var     jwtToken = GenerateJwtToken(dto);
+                    UserDto dto = MapToUserDto(existingGoogle);
+                    var jwtToken = GenerateJwtToken(dto);
                     _logger.LogInformation("[Auth] Google login SUCCESS (existing user) — UserId: {UserId}, Email: {Email}",
                         dto.Id, dto.Email);
                     await _activityLog.LogActivityAsync(dto.Id, $"{dto.FirstName} {dto.LastName}".Trim(), dto.RoleId, "LOGIN", "AUTH", $"Google login successful: {dto.Email}");
                     return (true, "Google login successful", dto, jwtToken);
                 }
 
-                // 2. Check email conflict — SP: wms.usp_FindUserByEmail
+                // 2. Check if user already exists with this email — SP: wms.usp_FindUserByEmail
                 var emailMatch = await conn.QueryFirstOrDefaultAsync<dynamic>(
                     "wms.usp_FindUserByEmail",
                     new { Email = googleEmail },
@@ -268,18 +267,26 @@ namespace WebinarApi.Services
 
                 if (emailMatch != null)
                 {
-                    string matchProvider = (string)emailMatch.AuthProvider;
-                    if (matchProvider == "Local")
+                    if (!(bool)emailMatch.IsActive)
                     {
-                        _logger.LogWarning("[Auth] Google login blocked — {Email} has a Local account.", googleEmail);
-                        return (false, "An account with this email exists. Please sign in with email and password.", null!, null!);
+                        _logger.LogWarning("[Auth] Google login blocked — account deactivated for {Email}.", googleEmail);
+                        return (false, "Your account has been deactivated.", null!, null!);
                     }
 
-                    if ((string)emailMatch.ProviderUserId != googleSub)
-                    {
-                        _logger.LogWarning("[Auth] Google provider conflict for email {Email} — ProviderUserId mismatch.", googleEmail);
-                        return (false, "This email is linked to a different Google account.", null!, null!);
-                    }
+                    _logger.LogInformation("[Auth] Linking Google OAuth (sub: {Sub}) to existing user: {Email}", googleSub, googleEmail);
+
+                    var linkedUser = await conn.QueryFirstOrDefaultAsync<dynamic>(
+                        "wms.usp_LinkGoogleAccount",
+                        new { UserId = (int)emailMatch.Id, ProviderUserId = googleSub },
+                        commandType: CommandType.StoredProcedure
+                    );
+
+                    UserDto dto      = MapToUserDto(linkedUser ?? emailMatch);
+                    var     jwtToken = GenerateJwtToken(dto);
+                    _logger.LogInformation("[Auth] Google login SUCCESS (account linked) — UserId: {UserId}, Email: {Email}",
+                        dto.Id, dto.Email);
+                    await _activityLog.LogActivityAsync(dto.Id, $"{dto.FirstName} {dto.LastName}".Trim(), dto.RoleId, "LOGIN", "AUTH", $"Google login successful (linked to existing account): {dto.Email}");
+                    return (true, "Google login successful", dto, jwtToken);
                 }
 
                 // 3. Create new Google user — SP: wms.usp_RegisterGoogleUser
@@ -296,8 +303,8 @@ namespace WebinarApi.Services
                     return (false, "Failed to create Google account", null!, null!);
                 }
 
-                UserDto newDto   = MapToUserDto(newUser);
-                var     newToken = GenerateJwtToken(newDto);
+                UserDto newDto = MapToUserDto(newUser);
+                var newToken = GenerateJwtToken(newDto);
                 _logger.LogInformation("[Auth] Google register SUCCESS — UserId: {UserId}, Email: {Email}",
                     newDto.Id, newDto.Email);
                 await _activityLog.LogActivityAsync(newDto.Id, $"{newDto.FirstName} {newDto.LastName}".Trim(), newDto.RoleId, "CREATE", "AUTH", $"Google account registered successfully: {newDto.Email}");
@@ -306,7 +313,7 @@ namespace WebinarApi.Services
             catch (InvalidOperationException ex)
             {
                 _logger.LogError(ex, "[Auth] Google token validation FAILED: {Message}", ex.Message);
-                if (ex.Message.Contains("Audience"))   return (false, "Google token mismatch. Please try again.", null!, null!);
+                if (ex.Message.Contains("Audience")) return (false, "Google token mismatch. Please try again.", null!, null!);
                 if (ex.Message.Contains("expired", StringComparison.OrdinalIgnoreCase)) return (false, "Google token expired.", null!, null!);
                 return (false, $"Google authentication failed: {ex.Message}", null!, null!);
             }
@@ -353,7 +360,7 @@ namespace WebinarApi.Services
                 // 2. Read configuration
                 int expirySeconds = _config.GetValue<int>("OtpSettings:ExpirySeconds", 60);
                 int maxOtpsPerDay = _config.GetValue<int>("OtpSettings:MaxOtpsPerDay", 3);
-                int resetDays     = _config.GetValue<int>("OtpSettings:ResetDays", 1);
+                int resetDays = _config.GetValue<int>("OtpSettings:ResetDays", 1);
 
                 // 3. Check daily/resetDays limit
                 int dailyCount = await conn.ExecuteScalarAsync<int>(
@@ -388,18 +395,15 @@ namespace WebinarApi.Services
                     commandType: CommandType.StoredProcedure
                 );
 
-                // 7. Asynchronously dispatch the email in background so the UI response is instantaneous (<50ms)
-                _ = Task.Run(async () =>
+                // 7. Dispatch the OTP verification email
+                try
                 {
-                    try
-                    {
-                        await _emailService.SendOtpEmailAsync(email, otp, expirySeconds);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "[Auth] Background OTP email dispatch failed for {Email}: {Message}", email, ex.Message);
-                    }
-                });
+                    await _emailService.SendOtpEmailAsync(email, otp, expirySeconds);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[Auth] OTP email dispatch failed for {Email}: {Message}", email, ex.Message);
+                }
 
                 int remaining = maxOtpsPerDay - (dailyCount + 1);
                 _logger.LogInformation("[Auth] OTP sent successfully to {Email}. Remaining daily OTPs: {Remaining}", email, remaining);
@@ -505,17 +509,17 @@ namespace WebinarApi.Services
         // -------------------------------------------------------
         private static UserDto MapToUserDto(dynamic u) => new UserDto
         {
-            Id            = (int)u.Id,
-            Email         = (string)u.Email,
-            FirstName     = (string)u.FirstName,
-            LastName      = (string?)u.LastName,
-            AuthProvider  = (string)u.AuthProvider,
-            RoleId        = (int)u.RoleId,
-            RoleName      = (string)u.RoleName,
-            IsActive      = (bool)u.IsActive,
+            Id = (int)u.Id,
+            Email = (string)u.Email,
+            FirstName = (string)u.FirstName,
+            LastName = (string?)u.LastName,
+            AuthProvider = (string)u.AuthProvider,
+            RoleId = (int)u.RoleId,
+            RoleName = (string)u.RoleName,
+            IsActive = (bool)u.IsActive,
             EmailVerified = (bool)u.EmailVerified,
-            CountryCode   = (string?)u.CountryCode,
-            MobileNumber  = (string?)u.MobileNumber
+            CountryCode = (string?)u.CountryCode,
+            MobileNumber = (string?)u.MobileNumber
         };
 
         // -------------------------------------------------------
@@ -523,8 +527,8 @@ namespace WebinarApi.Services
         // -------------------------------------------------------
         private string GenerateJwtToken(UserDto user)
         {
-            var jwt         = _config.GetSection("Jwt");
-            var key         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Secret"]!));
+            var jwt = _config.GetSection("Jwt");
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Secret"]!));
             var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
@@ -538,10 +542,10 @@ namespace WebinarApi.Services
 
             var expiryHours = double.Parse(jwt["ExpiryInHours"]!);
             var tokenObj = new JwtSecurityToken(
-                issuer:             jwt["Issuer"],
-                audience:           jwt["Audience"],
-                claims:             claims,
-                expires:            DateTime.UtcNow.AddHours(expiryHours),
+                issuer: jwt["Issuer"],
+                audience: jwt["Audience"],
+                claims: claims,
+                expires: DateTime.UtcNow.AddHours(expiryHours),
                 signingCredentials: credentials
             );
 

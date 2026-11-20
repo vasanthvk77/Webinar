@@ -269,6 +269,7 @@ export default function CardComponent({
   primaryIcon,
   primaryDisabled = false,
   primaryLoading = false,
+  primarySx,
   // Secondary button (e.g. "Details")
   onSecondaryClick,
   secondaryLabel = 'Details',
@@ -646,6 +647,7 @@ export default function CardComponent({
                     height: 40,
                     borderRadius: '14px',
                     fontSize: '13px',
+                    ...primarySx,
                   }}
                 >
                   {primaryLabel || (type === 'completed' ? 'Download Certificate' : 'View Session')}

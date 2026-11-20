@@ -51,6 +51,14 @@ BEGIN
             CONSTRAINT DF_Meetings_MeetingLayout DEFAULT 'UNIFIED_LAYOUT',
         LockSettingsPresenterPolicy            NVARCHAR(50) NULL
             CONSTRAINT DF_Meetings_LockPresenter DEFAULT 'default',
+        LockSettingsDisableMic                 BIT NOT NULL
+            CONSTRAINT DF_Meetings_LockMic DEFAULT 0,
+        LockSettingsDisableCam                 BIT NOT NULL
+            CONSTRAINT DF_Meetings_LockCam DEFAULT 0,
+        LockSettingsDisablePrivateChat         BIT NOT NULL
+            CONSTRAINT DF_Meetings_LockPrivateChat DEFAULT 0,
+        WebcamsOnlyForModerator                BIT NOT NULL
+            CONSTRAINT DF_Meetings_WebcamsModOnly DEFAULT 0,
         ModeratorPW                            VARCHAR(50) NULL,
         AttendeePW                             VARCHAR(50) NULL,
         ModeratorJoinUrl                       NVARCHAR(2000) NULL,
@@ -118,6 +126,35 @@ AND NOT EXISTS (
 )
 BEGIN
     ALTER TABLE wms.Meetings ADD ModeratorPW VARCHAR(50) NULL;
+END
+GO
+
+-- Migration guard: Ensure viewer restriction lock settings exist
+IF EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms')
+AND NOT EXISTS (SELECT 1 FROM sys.columns c JOIN sys.tables t ON c.object_id = t.object_id JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms' AND c.name = 'LockSettingsDisableMic')
+BEGIN
+    ALTER TABLE wms.Meetings ADD LockSettingsDisableMic BIT NOT NULL CONSTRAINT DF_Meetings_LockMic DEFAULT 0;
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms')
+AND NOT EXISTS (SELECT 1 FROM sys.columns c JOIN sys.tables t ON c.object_id = t.object_id JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms' AND c.name = 'LockSettingsDisableCam')
+BEGIN
+    ALTER TABLE wms.Meetings ADD LockSettingsDisableCam BIT NOT NULL CONSTRAINT DF_Meetings_LockCam DEFAULT 0;
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms')
+AND NOT EXISTS (SELECT 1 FROM sys.columns c JOIN sys.tables t ON c.object_id = t.object_id JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms' AND c.name = 'LockSettingsDisablePrivateChat')
+BEGIN
+    ALTER TABLE wms.Meetings ADD LockSettingsDisablePrivateChat BIT NOT NULL CONSTRAINT DF_Meetings_LockPrivateChat DEFAULT 0;
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms')
+AND NOT EXISTS (SELECT 1 FROM sys.columns c JOIN sys.tables t ON c.object_id = t.object_id JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = 'Meetings' AND s.name = 'wms' AND c.name = 'WebcamsOnlyForModerator')
+BEGIN
+    ALTER TABLE wms.Meetings ADD WebcamsOnlyForModerator BIT NOT NULL CONSTRAINT DF_Meetings_WebcamsModOnly DEFAULT 0;
 END
 GO
 
@@ -265,6 +302,10 @@ BEGIN
         m.MuteOnStart,
         m.MeetingLayout,
         m.LockSettingsPresenterPolicy,
+        ISNULL(m.LockSettingsDisableMic, 0) AS LockSettingsDisableMic,
+        ISNULL(m.LockSettingsDisableCam, 0) AS LockSettingsDisableCam,
+        ISNULL(m.LockSettingsDisablePrivateChat, 0) AS LockSettingsDisablePrivateChat,
+        ISNULL(m.WebcamsOnlyForModerator, 0) AS WebcamsOnlyForModerator,
         m.ModeratorPW,
         m.AttendeePW,
         m.ModeratorJoinUrl,
@@ -367,6 +408,10 @@ CREATE PROCEDURE wms.usp_ScheduleMeeting
     @MuteOnStart                            BIT = 1,
     @MeetingLayout                          NVARCHAR(50) = 'UNIFIED_LAYOUT',
     @LockSettingsPresenterPolicy            NVARCHAR(50) = 'default',
+    @LockSettingsDisableMic                 BIT = 0,
+    @LockSettingsDisableCam                 BIT = 0,
+    @LockSettingsDisablePrivateChat         BIT = 0,
+    @WebcamsOnlyForModerator                BIT = 0,
     @ModeratorPW                            VARCHAR(50) = NULL,
     @AttendeePW                             VARCHAR(50) = NULL,
     @UserId                                 INT
@@ -405,6 +450,10 @@ BEGIN
             MuteOnStart                            = @MuteOnStart,
             MeetingLayout                          = @MeetingLayout,
             LockSettingsPresenterPolicy            = @LockSettingsPresenterPolicy,
+            LockSettingsDisableMic                 = @LockSettingsDisableMic,
+            LockSettingsDisableCam                 = @LockSettingsDisableCam,
+            LockSettingsDisablePrivateChat         = @LockSettingsDisablePrivateChat,
+            WebcamsOnlyForModerator                = @WebcamsOnlyForModerator,
             ModeratorPW                            = ISNULL(@ModeratorPW, ModeratorPW),
             AttendeePW                             = ISNULL(@AttendeePW, AttendeePW),
             UpdatedAt                              = SYSUTCDATETIME(),
@@ -432,6 +481,10 @@ BEGIN
             MuteOnStart,
             MeetingLayout,
             LockSettingsPresenterPolicy,
+            LockSettingsDisableMic,
+            LockSettingsDisableCam,
+            LockSettingsDisablePrivateChat,
+            WebcamsOnlyForModerator,
             ModeratorPW,
             AttendeePW,
             ModeratorJoinUrl,
@@ -459,6 +512,10 @@ BEGIN
             @MuteOnStart,
             @MeetingLayout,
             @LockSettingsPresenterPolicy,
+            @LockSettingsDisableMic,
+            @LockSettingsDisableCam,
+            @LockSettingsDisablePrivateChat,
+            @WebcamsOnlyForModerator,
             @ModeratorPW,
             @AttendeePW,
             NULL,
@@ -491,6 +548,10 @@ BEGIN
         m.MuteOnStart,
         m.MeetingLayout,
         m.LockSettingsPresenterPolicy,
+        ISNULL(m.LockSettingsDisableMic, 0) AS LockSettingsDisableMic,
+        ISNULL(m.LockSettingsDisableCam, 0) AS LockSettingsDisableCam,
+        ISNULL(m.LockSettingsDisablePrivateChat, 0) AS LockSettingsDisablePrivateChat,
+        ISNULL(m.WebcamsOnlyForModerator, 0) AS WebcamsOnlyForModerator,
         m.ModeratorPW,
         m.AttendeePW,
         m.ModeratorJoinUrl,
@@ -538,6 +599,10 @@ BEGIN
         m.MuteOnStart,
         m.MeetingLayout,
         m.LockSettingsPresenterPolicy,
+        ISNULL(m.LockSettingsDisableMic, 0) AS LockSettingsDisableMic,
+        ISNULL(m.LockSettingsDisableCam, 0) AS LockSettingsDisableCam,
+        ISNULL(m.LockSettingsDisablePrivateChat, 0) AS LockSettingsDisablePrivateChat,
+        ISNULL(m.WebcamsOnlyForModerator, 0) AS WebcamsOnlyForModerator,
         m.ModeratorPW,
         m.AttendeePW,
         m.ModeratorJoinUrl,
@@ -586,6 +651,10 @@ BEGIN
         m.MuteOnStart,
         m.MeetingLayout,
         m.LockSettingsPresenterPolicy,
+        ISNULL(m.LockSettingsDisableMic, 0) AS LockSettingsDisableMic,
+        ISNULL(m.LockSettingsDisableCam, 0) AS LockSettingsDisableCam,
+        ISNULL(m.LockSettingsDisablePrivateChat, 0) AS LockSettingsDisablePrivateChat,
+        ISNULL(m.WebcamsOnlyForModerator, 0) AS WebcamsOnlyForModerator,
         m.ModeratorPW,
         m.AttendeePW,
         m.ModeratorJoinUrl,
@@ -1038,16 +1107,18 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT 
-        Id,
-        WebinarId,
-        MeetingId,
-        MeetingIDString,
-        RecordId,
-        Status,
-        CreatedAt
-    FROM wms.WebinarRecordings
-    WHERE Status IN ('PROCESSING', 'WAITING_FOR_END')
-      AND CreatedAt > DATEADD(HOUR, -24, SYSUTCDATETIME());
+        wr.Id,
+        wr.WebinarId,
+        wr.MeetingId,
+        wr.MeetingIDString,
+        wr.RecordId,
+        wr.Status,
+        wr.CreatedAt,
+        w.EndTime
+    FROM wms.WebinarRecordings wr
+    JOIN wms.Webinars w ON w.Id = wr.WebinarId
+    WHERE wr.Status IN ('PROCESSING', 'WAITING_FOR_END')
+      AND wr.CreatedAt > DATEADD(HOUR, -24, SYSUTCDATETIME());
 END
 GO
 
@@ -1226,10 +1297,13 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Safety check: Never revert a COMPLETED recording back to NOT_STARTED or IN_PROGRESS
     UPDATE wms.WebinarRecordings
     SET TranscriptStatus = @TranscriptStatus,
         UpdatedAt = SYSUTCDATETIME()
-    WHERE RecordId = @RecordId;
+    WHERE RecordId = @RecordId
+      AND (IsTranscribed = 0 OR @TranscriptStatus = 'COMPLETED')
+      AND (TranscriptStatus <> 'COMPLETED' OR @TranscriptStatus = 'COMPLETED');
 
     SELECT @@ROWCOUNT AS UpdatedCount;
 END
@@ -1295,38 +1369,111 @@ GO
 
 -- ============================================================
 -- SP: wms.usp_GetCompletedTranscripts
--- Purpose: Retrieves all transcribed webinars where TranscriptStatus = 'COMPLETED' AND IsTranscribed = 1
+-- Purpose: Retrieves webinars and meeting recordings for the Transcript tab:
+--          - COMPLETED: full transcript available
+--          - PROCESSING: audio downloading or transcribing
+--          - NOT_STARTED: webinar in progress (StartTime <= NOW)
+--          Super Admin & Admin (RoleId 1 or 2) see ALL webinars.
+--          Students (RoleId 3) see webinars they are registered for.
 -- ============================================================
 IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_GetCompletedTranscripts' AND s.name = 'wms')
     DROP PROCEDURE wms.usp_GetCompletedTranscripts;
 GO
 
 CREATE PROCEDURE wms.usp_GetCompletedTranscripts
+    @UserId INT = NULL,
+    @RoleId INT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT
-        wr.Id,
-        wr.WebinarId,
-        w.WebinarName,
-        w.WebinarDate,
-        w.StartTime,
-        w.EndTime,
-        w.DurationMinutes,
-        w.ConductorName,
-        c.CategoryName,
-        wr.RecordId,
-        wr.TranscriptStatus,
-        wr.IsTranscribed,
-        wr.TranscriptFilePath,
-        wr.CreatedAt,
-        wr.UpdatedAt
-    FROM wms.WebinarRecordings wr
-    INNER JOIN wms.Webinars w ON w.Id = wr.WebinarId
-    LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
-    WHERE wr.TranscriptStatus = 'COMPLETED'
-      AND wr.IsTranscribed = 1
-    ORDER BY wr.CreatedAt DESC;
+    -- Super Admin (1) and Admin (2) see ALL transcripts and ongoing webinars
+    IF @RoleId IN (1, 2)
+    BEGIN
+        SELECT
+            ISNULL(lr.Id, w.Id) AS Id,
+            w.Id AS WebinarId,
+            w.WebinarName,
+            w.WebinarDate,
+            w.StartTime,
+            w.EndTime,
+            w.DurationMinutes,
+            w.ConductorName,
+            c.CategoryName,
+            ISNULL(lr.RecordId, '') AS RecordId,
+            ISNULL(lr.TranscriptStatus, 'NOT_STARTED') AS TranscriptStatus,
+            ISNULL(lr.IsTranscribed, 0) AS IsTranscribed,
+            lr.TranscriptFilePath,
+            ISNULL(lr.CreatedAt, w.CreatedAt) AS CreatedAt,
+            lr.UpdatedAt
+        FROM wms.Webinars w
+        LEFT JOIN (
+            SELECT 
+                wr.Id,
+                wr.WebinarId,
+                wr.RecordId,
+                wr.TranscriptStatus,
+                wr.IsTranscribed,
+                wr.TranscriptFilePath,
+                wr.CreatedAt,
+                wr.UpdatedAt,
+                ROW_NUMBER() OVER (PARTITION BY wr.WebinarId ORDER BY wr.CreatedAt DESC) AS rn
+            FROM wms.WebinarRecordings wr
+        ) lr ON lr.WebinarId = w.Id AND lr.rn = 1
+        LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+        WHERE (
+            -- Either recording exists
+            lr.Id IS NOT NULL 
+            -- Or meeting has started / is going
+            OR (w.StartTime <= SYSUTCDATETIME())
+        )
+        ORDER BY w.StartTime DESC;
+    END
+    ELSE
+    BEGIN
+        -- Students see webinars they are registered for
+        SELECT
+            ISNULL(lr.Id, w.Id) AS Id,
+            w.Id AS WebinarId,
+            w.WebinarName,
+            w.WebinarDate,
+            w.StartTime,
+            w.EndTime,
+            w.DurationMinutes,
+            w.ConductorName,
+            c.CategoryName,
+            ISNULL(lr.RecordId, '') AS RecordId,
+            ISNULL(lr.TranscriptStatus, 'NOT_STARTED') AS TranscriptStatus,
+            ISNULL(lr.IsTranscribed, 0) AS IsTranscribed,
+            lr.TranscriptFilePath,
+            ISNULL(lr.CreatedAt, w.CreatedAt) AS CreatedAt,
+            lr.UpdatedAt
+        FROM wms.WebinarRegistrations reg
+        INNER JOIN wms.Webinars w ON w.Id = reg.WebinarId
+        LEFT JOIN (
+            SELECT 
+                wr.Id,
+                wr.WebinarId,
+                wr.RecordId,
+                wr.TranscriptStatus,
+                wr.IsTranscribed,
+                wr.TranscriptFilePath,
+                wr.CreatedAt,
+                wr.UpdatedAt,
+                ROW_NUMBER() OVER (PARTITION BY wr.WebinarId ORDER BY wr.CreatedAt DESC) AS rn
+            FROM wms.WebinarRecordings wr
+        ) lr ON lr.WebinarId = w.Id AND lr.rn = 1
+        LEFT JOIN wms.WebinarCategories c ON c.Id = w.CategoryId
+        WHERE reg.UserId = @UserId
+          AND (
+              -- Completed transcripts
+              (lr.TranscriptStatus = 'COMPLETED' AND lr.IsTranscribed = 1)
+              -- Or processing transcripts
+              OR (lr.TranscriptStatus IN ('PROCESSING', 'IN_PROGRESS', 'DOWNLOADED'))
+              -- Or webinar has started (StartTime <= Current time)
+              OR (w.StartTime <= SYSUTCDATETIME())
+          )
+        ORDER BY w.StartTime DESC;
+    END
 END
 GO

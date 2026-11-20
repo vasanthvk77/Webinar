@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webinar Registration Confirmed</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f4f6f9;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #333333;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 30px auto;
+            background: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e5e7eb;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #F97316 0%, #EA580C 100%);
+            padding: 38px 30px;
+            text-align: center;
+            color: #ffffff;
+        }
+
+        .header-icon {
+            font-size: 38px;
+            margin-bottom: 8px;
+            display: inline-block;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 25px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            color: #ffffff;
+        }
+
+        .header p {
+            margin: 8px 0 0;
+            font-size: 15px;
+            color: #FFEDD5;
+            font-weight: 500;
+        }
+
+        .content {
+            padding: 32px 30px;
+        }
+
+        .greeting {
+            font-size: 17px;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 10px;
+        }
+
+        .intro-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #4b5563;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: #fffaf5;
+            border: 1px solid #fed7aa;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .badge-row {
+            margin-bottom: 12px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #ffedd5;
+            color: #c2410c;
+            margin-right: 6px;
+        }
+
+        .badge-paid {
+            background: #fef3c7;
+            color: #b45309;
+        }
+
+        .badge-free {
+            background: #dcfce7;
+            color: #15803d;
+        }
+
+        .webinar-title {
+            font-size: 21px;
+            font-weight: 800;
+            color: #111827;
+            margin: 0 0 16px;
+            line-height: 1.3;
+        }
+
+        .details-grid {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .details-grid td {
+            padding: 9px 0;
+            font-size: 14px;
+            color: #4b5563;
+            border-bottom: 1px dashed #fed7aa;
+        }
+
+        .details-grid tr:last-child td {
+            border-bottom: none;
+        }
+
+        .details-grid td strong {
+            color: #1f2937;
+            display: inline-block;
+            width: 110px;
+        }
+
+        .join-box {
+            background: #ecfdf5;
+            border: 1.5px solid #a7f3d0;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            margin: 24px 0;
+        }
+
+        .join-box-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #065f46;
+            margin-bottom: 6px;
+        }
+
+        .join-box-desc {
+            font-size: 14px;
+            color: #047857;
+            margin: 0 0 16px;
+        }
+
+        .btn-join {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 13px 32px;
+            font-size: 15px;
+            font-weight: 700;
+            border-radius: 10px;
+            display: inline-block;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+        }
+
+        .pending-box {
+            background: #fff7ed;
+            border: 1.5px dashed #fdba74;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            margin: 24px 0;
+        }
+
+        .pending-icon {
+            font-size: 26px;
+            margin-bottom: 6px;
+        }
+
+        .pending-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #9a3412;
+            margin-bottom: 4px;
+        }
+
+        .pending-desc {
+            font-size: 14px;
+            color: #c2410c;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .btn-wrapper {
+            text-align: center;
+            margin: 24px 0 16px;
+        }
+
+        .btn-dashboard {
+            background: linear-gradient(135deg, #F97316 0%, #EA580C 100%);
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 14px 34px;
+            font-size: 15px;
+            font-weight: 700;
+            border-radius: 10px;
+            display: inline-block;
+            box-shadow: 0 4px 14px rgba(234, 88, 12, 0.35);
+        }
+
+        .footer {
+            background: #f8fafc;
+            padding: 24px 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Registration Confirmed!</h1>
+            <p>Your seat has been reserved successfully</p>
+        </div>
+        <div class="content">
+            <div class="greeting">Hi {{StudentName}},</div>
+            <p class="intro-text">
+                Thank you for registering! You are officially confirmed for the upcoming masterclass. Below are your
+                confirmed webinar details:
+            </p>
+
+            <div class="card">
+                <div class="badge-row">
+                    <span class="badge">{{Category}}</span>
+                </div>
+                <div class="webinar-title">{{WebinarTitle}}</div>
+                <table class="details-grid">
+                    <tr>
+                        <td><strong>Date:</strong></td>
+                        <td>{{Date}}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Time:</strong></td>
+                        <td>{{Time}} ({{Duration}})</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Instructor:</strong></td>
+                        <td>{{ConductorName}}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Dynamic Meeting Join Section -->
+            {{MeetingLinkSection}}
+
+            <div class="btn-wrapper">
+                <a href="{{DashboardUrl}}" class="btn-dashboard" target="_blank">View in Student Portal</a>
+            </div>
+        </div>
+        <div class="footer">
+            <p>&copy; 2026 ProDesX Webinar Management. All rights reserved.</p>
+            <p>You received this email because you registered for a session on the ProDesX learning portal.</p>
+        </div>
+    </div>
+</body>
+
+</html>

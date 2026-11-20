@@ -848,6 +848,12 @@ namespace WebinarApi.Services
                 string message = (string)result.Message;
                 string? webinarName = (string?)result.WebinarName;
 
+                // Explicit duplicate protection: if user is already registered, treat as failure / duplicate notice
+                if (message != null && message.Contains("already registered", StringComparison.OrdinalIgnoreCase))
+                {
+                    success = false;
+                }
+
                 _logger.LogInformation("[Webinar] User registered result — Success: {Success}, Message: {Message}", success, message);
                 return (success, message, webinarName);
             }

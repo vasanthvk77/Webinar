@@ -22,6 +22,7 @@ import CalendarMonthIcon   from '@mui/icons-material/CalendarMonth';
 import AutorenewIcon       from '@mui/icons-material/Autorenew';
 import CloudUploadIcon     from '@mui/icons-material/CloudUpload';
 import ImageIcon           from '@mui/icons-material/Image';
+import CategoryIcon        from '@mui/icons-material/Category';
 import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
 import toast             from 'react-hot-toast';
 import { webinarService, categoryService, certificateTemplateService, meetingService } from '../../services/api';
@@ -61,6 +62,10 @@ const EMPTY_MEETING_FORM = {
   endWhenNoModerator: false,
   guestPolicy: 'ALWAYS_ACCEPT',
   muteOnStart: true,
+  lockSettingsDisableMic: false,
+  lockSettingsDisableCam: false,
+  lockSettingsDisablePrivateChat: false,
+  webcamsOnlyForModerator: false,
   meetingLayout: 'UNIFIED_LAYOUT',
   lockSettingsPresenterPolicy: 'default',
   moderatorPW: '',
@@ -150,6 +155,44 @@ export default function Webinars() {
   const [bulkLoadingId, setBulkLoadingId] = useState(null);
   const [regeneratingId, setRegeneratingId] = useState(null);
 
+  // Quick Category creation inside Webinar modal
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [catSaving, setCatSaving] = useState(false);
+  const [catError, setCatError] = useState('');
+
+  const handleQuickCreateCategory = async () => {
+    setCatError('');
+    if (!newCatName.trim()) {
+      setCatError('Category name is required');
+      return;
+    }
+    setCatSaving(true);
+    try {
+      const res = await categoryService.create(newCatName.trim());
+      if (res.data.success) {
+        toast.success('Category created successfully');
+        const createdCat = res.data.data;
+        const cRes = await categoryService.getAll();
+        if (cRes.data.success) {
+          setCategories(cRes.data.data);
+        } else {
+          setCategories(prev => [...prev, createdCat]);
+        }
+        // Auto-select the newly created category in the dropdown
+        setField('categoryId', String(createdCat.id));
+        setCatModalOpen(false);
+        setNewCatName('');
+      } else {
+        setCatError(res.data.message || 'Failed to create category');
+      }
+    } catch (err) {
+      setCatError(err.response?.data?.message || 'An error occurred while creating category');
+    } finally {
+      setCatSaving(false);
+    }
+  };
+
   // Live-calculated duration shown in the read-only field
   const calculatedDuration = useMemo(
     () => calcDuration(form.startTime, form.endTime),
@@ -228,13 +271,32 @@ export default function Webinars() {
     setSelectedImageFile(null);
     setImagePreview(null);
     const initialCode = availableCountryCodes.length > 0 ? availableCountryCodes[0] : '+91';
+
+    // Auto-select latest created category (by createdAt or highest id)
+    const latestCat = categories.length > 0
+      ? [...categories].sort((a, b) => {
+          if (a.createdAt && b.createdAt) {
+            return new Date(b.createdAt) - new Date(a.createdAt);
+          }
+          return (b.id || 0) - (a.id || 0);
+        })[0]
+      : null;
+
     setForm({
       ...EMPTY_FORM,
+      categoryId: latestCat ? String(latestCat.id) : '',
       selectedCountries: [initialCode],
       countryPrices: { [initialCode]: '' },
     });
     setFormError('');
     setModal('create');
+
+    // If no category exists, automatically prompt user to create one
+    if (!latestCat) {
+      setNewCatName('');
+      setCatError('');
+      setCatModalOpen(true);
+    }
   };
 
   const openEdit = async (row) => {
@@ -342,6 +404,10 @@ export default function Webinars() {
           endWhenNoModerator: Boolean(m.endWhenNoModerator),
           guestPolicy: m.guestPolicy || 'ALWAYS_ACCEPT',
           muteOnStart: m.muteOnStart !== undefined ? Boolean(m.muteOnStart) : true,
+          lockSettingsDisableMic: Boolean(m.lockSettingsDisableMic),
+          lockSettingsDisableCam: Boolean(m.lockSettingsDisableCam),
+          lockSettingsDisablePrivateChat: Boolean(m.lockSettingsDisablePrivateChat),
+          webcamsOnlyForModerator: Boolean(m.webcamsOnlyForModerator),
           meetingLayout: m.meetingLayout || 'UNIFIED_LAYOUT',
           lockSettingsPresenterPolicy: m.lockSettingsPresenterPolicy || 'default',
           moderatorPW: m.moderatorPW || randomModeratorPW,
@@ -389,6 +455,10 @@ export default function Webinars() {
         endWhenNoModerator: Boolean(meetingForm.endWhenNoModerator),
         guestPolicy: meetingForm.guestPolicy || 'ALWAYS_ACCEPT',
         muteOnStart: Boolean(meetingForm.muteOnStart),
+        lockSettingsDisableMic: Boolean(meetingForm.lockSettingsDisableMic),
+        lockSettingsDisableCam: Boolean(meetingForm.lockSettingsDisableCam),
+        lockSettingsDisablePrivateChat: Boolean(meetingForm.lockSettingsDisablePrivateChat),
+        webcamsOnlyForModerator: Boolean(meetingForm.webcamsOnlyForModerator),
         meetingLayout: meetingForm.meetingLayout || 'UNIFIED_LAYOUT',
         lockSettingsPresenterPolicy: meetingForm.lockSettingsPresenterPolicy || 'default',
         moderatorPW: meetingForm.moderatorPW?.trim() || null,
@@ -1227,13 +1297,74 @@ export default function Webinars() {
             <Box sx={{ flex: 1 }}>
               <Label text="Category" required />
               <TextField fullWidth size="small" select value={form.categoryId}
-                onChange={e => setField('categoryId', e.target.value)} sx={inputSx}
-                SelectProps={{ displayEmpty: true }}
+                onChange={e => {
+                  if (e.target.value === '__CREATE_NEW_CATEGORY__') {
+                    setNewCatName('');
+                    setCatError('');
+                    setCatModalOpen(true);
+                  } else {
+                    setField('categoryId', e.target.value);
+                  }
+                }}
+                sx={inputSx}
+                SelectProps={{
+                  displayEmpty: true,
+                  renderValue: (selected) => {
+                    if (!selected) {
+                      return categories.length === 0 ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: colors.accent, fontWeight: 600 }}>
+                          <AddIcon sx={{ fontSize: 16 }} />
+                          <Typography sx={{ fontSize: '13px', fontWeight: 600 }}>Create Category</Typography>
+                        </Box>
+                      ) : (
+                        <Typography sx={{ fontSize: '13px', color: colors.textMuted }}>
+                          Select category
+                        </Typography>
+                      );
+                    }
+                    const found = categories.find(c => String(c.id) === String(selected));
+                    return found ? (
+                      <Typography sx={{ fontSize: '13px' }}>{found.categoryName}</Typography>
+                    ) : selected;
+                  }
+                }}
               >
-                <MenuItem value="" disabled>Select category</MenuItem>
+                {categories.length === 0 ? (
+                  <MenuItem
+                    value=""
+                    onClick={() => {
+                      setNewCatName('');
+                      setCatError('');
+                      setCatModalOpen(true);
+                    }}
+                    sx={{ color: colors.accent, fontWeight: 600, fontSize: '13px', display: 'flex', alignItems: 'center', gap: 0.5 }}
+                  >
+                    <AddIcon sx={{ fontSize: 16 }} />
+                    Create Category
+                  </MenuItem>
+                ) : (
+                  <MenuItem value="" disabled>Select category</MenuItem>
+                )}
                 {categories.map(c => (
                   <MenuItem key={c.id} value={String(c.id)}>{c.categoryName}</MenuItem>
                 ))}
+                <Divider sx={{ my: 0.5, borderColor: colors.border }} />
+                <MenuItem
+                  value="__CREATE_NEW_CATEGORY__"
+                  sx={{
+                    color: colors.accent,
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    py: 1,
+                    '&:hover': { bgcolor: colors.accentMuted }
+                  }}
+                >
+                  <AddIcon sx={{ fontSize: 18, color: colors.accent }} />
+                  Create Category
+                </MenuItem>
               </TextField>
             </Box>
           </Box>
@@ -1574,6 +1705,75 @@ export default function Webinars() {
         </DialogActions>
       </Dialog>
 
+      {/* ── Quick Create Category Dialog (from Category dropdown) ── */}
+      <Dialog
+        open={catModalOpen}
+        onClose={() => { if (!catSaving) setCatModalOpen(false); }}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', border: 'none' } }}
+        sx={{ zIndex: 1400 }}
+      >
+        {/* Header */}
+        <Box sx={{ px: 3.5, pt: 3, pb: 2, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: colors.accentMuted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <CategoryIcon sx={{ fontSize: 20, color: colors.accent }} />
+            </Box>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: '17px', color: colors.primary }}>
+                Create Category
+              </Typography>
+              <Typography sx={{ fontSize: '12.5px', color: colors.textMuted, mt: 0.1 }}>
+                Enter a unique category name
+              </Typography>
+            </Box>
+          </Box>
+          <IconButton size="small" onClick={() => { if (!catSaving) setCatModalOpen(false); }} sx={{ color: colors.textMuted, mt: 0.25 }}>
+            <CloseIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Box>
+
+        <Divider sx={{ borderColor: colors.border }} />
+
+        <DialogContent sx={{ px: 3.5, pt: 2.5, pb: 1 }}>
+          <Typography sx={{ fontSize: '13px', fontWeight: 500, color: colors.textSecondary, mb: 0.75 }}>
+            Category Name <span style={{ color: colors.error }}>*</span>
+          </Typography>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="e.g. Technology"
+            value={newCatName}
+            onChange={e => { setNewCatName(e.target.value); setCatError(''); }}
+            onKeyDown={e => e.key === 'Enter' && handleQuickCreateCategory()}
+            autoFocus
+            sx={inputSx}
+          />
+          {catError && (
+            <Typography sx={{ fontSize: '12px', color: colors.error, mt: 1 }}>
+              {catError}
+            </Typography>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3.5, pb: 3, pt: 2, gap: 1 }}>
+          <Button onClick={() => setCatModalOpen(false)} disabled={catSaving} sx={{ color: colors.textSecondary, fontWeight: 600, borderRadius: 2 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleQuickCreateCategory}
+            disabled={catSaving}
+            sx={{ bgcolor: colors.accent, color: colors.textOnAccent, '&:hover': { bgcolor: colors.accentDark }, fontWeight: 700, borderRadius: 2, minWidth: 100 }}
+          >
+            {catSaving
+              ? <CircularProgress size={18} sx={{ color: colors.textOnAccent }} />
+              : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           DELETE CONFIRM MODAL
       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
@@ -1712,6 +1912,9 @@ export default function Webinars() {
                 sx={inputSx}
                 inputProps={{ min: 1 }}
               />
+              <Typography sx={{ fontSize: '11px', color: colors.textMuted, mt: 0.5 }}>
+                BBB room auto-adjusts with registrations + grace count
+              </Typography>
             </Box>
             <Box sx={{ flex: 1 }}>
               <Label text="Duration (Minutes)" required />
@@ -1830,66 +2033,165 @@ export default function Webinars() {
               mb: 1.5,
             }}
           >
-            <Typography sx={{ fontSize: '13px', fontWeight: 600, color: colors.primary }}>
-              Meeting Rules & Recording
-            </Typography>
+            <Box>
+              <Typography sx={{ fontSize: '13.5px', fontWeight: 700, color: colors.primary }}>
+                Meeting Rules & Viewer Restrictions
+              </Typography>
+              <Typography sx={{ fontSize: '11.5px', color: colors.textMuted, mt: 0.2 }}>
+                Configure participant permissions and access control during the meeting
+              </Typography>
+            </Box>
             <Box
               sx={{
                 display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' },
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
                 gap: 1.5,
               }}
             >
-              <FormControlLabel
-                control={
+              {[
+                {
+                  key: 'muteOnStart',
+                  title: 'Mute On Start',
+                  desc: 'Everyone joins muted',
+                  checked: meetingForm.muteOnStart,
+                },
+                {
+                  key: 'lockSettingsDisableMic',
+                  title: 'Disable Viewer Microphone',
+                  desc: "Viewers can't turn their microphone on. Their mic button is disabled until a moderator unlocks them",
+                  checked: meetingForm.lockSettingsDisableMic,
+                },
+                {
+                  key: 'lockSettingsDisableCam',
+                  title: 'Disable Viewer Webcam',
+                  desc: "Viewers can't share a webcam",
+                  checked: meetingForm.lockSettingsDisableCam,
+                },
+                {
+                  key: 'lockSettingsDisablePrivateChat',
+                  title: 'Disable Private Chat',
+                  desc: "Viewers can't send private messages to each other",
+                  checked: meetingForm.lockSettingsDisablePrivateChat,
+                },
+                {
+                  key: 'webcamsOnlyForModerator',
+                  title: 'Webcams Only For Moderator',
+                  desc: "Viewers' webcams, if allowed, are seen only by moderators",
+                  checked: meetingForm.webcamsOnlyForModerator,
+                },
+              ].map(item => (
+                <Box
+                  key={item.key}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    p: 1.5,
+                    borderRadius: 2,
+                    bgcolor: '#fff',
+                    border: `1px solid ${colors.border}`,
+                    transition: 'all 0.15s ease',
+                    '&:hover': {
+                      borderColor: colors.accent,
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                    },
+                  }}
+                >
+                  <Box sx={{ pr: 1.5 }}>
+                    <Typography sx={{ fontSize: '12.5px', fontWeight: 600, color: colors.primary }}>
+                      {item.title}
+                    </Typography>
+                    <Typography sx={{ fontSize: '11px', color: colors.textMuted, mt: 0.3, lineHeight: 1.35 }}>
+                      {item.desc}
+                    </Typography>
+                  </Box>
                   <Switch
-                    checked={meetingForm.muteOnStart}
-                    onChange={e => setMeetingField('muteOnStart', e.target.checked)}
+                    size="small"
+                    checked={item.checked}
+                    onChange={e => setMeetingField(item.key, e.target.checked)}
                     color="primary"
+                    sx={{ flexShrink: 0, mt: 0.2 }}
                   />
-                }
-                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Mute On Start</Typography>}
-              />
-              <FormControlLabel
-                control={
+                </Box>
+              ))}
+            </Box>
+
+            {/* Recording & Lifecycle */}
+            <Box sx={{ mt: 1 }}>
+              <Typography sx={{ fontSize: '13.5px', fontWeight: 700, color: colors.primary }}>
+                Recording & Lifecycle
+              </Typography>
+              <Typography sx={{ fontSize: '11.5px', color: colors.textMuted, mt: 0.2 }}>
+                Configure recording automation and session timeout behavior
+              </Typography>
+            </Box>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                gap: 1.5,
+              }}
+            >
+              {[
+                {
+                  key: 'record',
+                  title: 'Record Meeting',
+                  desc: 'Capture and record audio/video for this webinar session',
+                  checked: meetingForm.record,
+                },
+                {
+                  key: 'autoStartRecording',
+                  title: 'Auto Start Recording',
+                  desc: 'Automatically start recording as soon as the meeting begins',
+                  checked: meetingForm.autoStartRecording,
+                },
+                {
+                  key: 'allowStartStopRecording',
+                  title: 'Allow Start/Stop Recording',
+                  desc: 'Permit moderators to pause and resume recording during the session',
+                  checked: meetingForm.allowStartStopRecording,
+                },
+                {
+                  key: 'endWhenNoModerator',
+                  title: 'End When No Moderator',
+                  desc: 'Automatically terminate meeting when all moderators leave',
+                  checked: meetingForm.endWhenNoModerator,
+                },
+              ].map(item => (
+                <Box
+                  key={item.key}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    p: 1.5,
+                    borderRadius: 2,
+                    bgcolor: '#fff',
+                    border: `1px solid ${colors.border}`,
+                    transition: 'all 0.15s ease',
+                    '&:hover': {
+                      borderColor: colors.accent,
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                    },
+                  }}
+                >
+                  <Box sx={{ pr: 1.5 }}>
+                    <Typography sx={{ fontSize: '12.5px', fontWeight: 600, color: colors.primary }}>
+                      {item.title}
+                    </Typography>
+                    <Typography sx={{ fontSize: '11px', color: colors.textMuted, mt: 0.3, lineHeight: 1.35 }}>
+                      {item.desc}
+                    </Typography>
+                  </Box>
                   <Switch
-                    checked={meetingForm.record}
-                    onChange={e => setMeetingField('record', e.target.checked)}
+                    size="small"
+                    checked={item.checked}
+                    onChange={e => setMeetingField(item.key, e.target.checked)}
                     color="primary"
+                    sx={{ flexShrink: 0, mt: 0.2 }}
                   />
-                }
-                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Record Meeting</Typography>}
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={meetingForm.autoStartRecording}
-                    onChange={e => setMeetingField('autoStartRecording', e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Auto Start Recording</Typography>}
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={meetingForm.allowStartStopRecording}
-                    onChange={e => setMeetingField('allowStartStopRecording', e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>Allow Start/Stop Recording</Typography>}
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={meetingForm.endWhenNoModerator}
-                    onChange={e => setMeetingField('endWhenNoModerator', e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label={<Typography sx={{ fontSize: '13px', color: colors.textSecondary }}>End When No Moderator</Typography>}
-              />
+                </Box>
+              ))}
             </Box>
           </Box>
 

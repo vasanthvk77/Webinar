@@ -621,11 +621,7 @@ export default function StudentDashboard() {
                     size="large"
                     endIcon={<ArrowForwardIcon sx={{ fontSize: 18 }} />}
                     onClick={() => {
-                      if (latest.isPaid) {
-                        navigate(`/register?trackingId=${latest.shareId}`);
-                      } else {
-                        navigate('/dashboard/webinars?tab=available');
-                      }
+                      navigate(`/dashboard/webinars?register=${latest.shareId || latest.id}`);
                     }}
                     sx={{
                       height: 48,

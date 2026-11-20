@@ -327,8 +327,43 @@ BEGIN
         r.Name AS RoleName
     FROM wms.Users u
     JOIN wms.Roles r ON r.Id = u.RoleId
-    WHERE u.AuthProvider = 'Google'
-      AND u.ProviderUserId = @ProviderUserId;
+    WHERE u.ProviderUserId = @ProviderUserId;
+END
+GO
+
+-- =============================================
+-- SP: wms.usp_LinkGoogleAccount
+-- Purpose : Link Google ProviderUserId to an existing user
+--           (e.g., user signed up with email/password first).
+--           Also marks EmailVerified = 1.
+-- Used by : GoogleLoginAsync
+-- =============================================
+IF EXISTS (SELECT 1 FROM sys.procedures p JOIN sys.schemas s ON p.schema_id = s.schema_id WHERE p.name = 'usp_LinkGoogleAccount' AND s.name = 'wms')
+    DROP PROCEDURE wms.usp_LinkGoogleAccount;
+GO
+
+CREATE PROCEDURE wms.usp_LinkGoogleAccount
+    @UserId         INT,
+    @ProviderUserId NVARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE wms.Users
+    SET ProviderUserId = @ProviderUserId,
+        EmailVerified = 1,
+        UpdatedAt = GETUTCDATE()
+    WHERE Id = @UserId;
+
+    SELECT
+        u.Id, u.FirstName, u.LastName, u.Email,
+        u.AuthProvider, u.ProviderUserId, u.RoleId,
+        u.IsActive, u.EmailVerified,
+        u.CountryCode, u.MobileNumber,
+        r.Name AS RoleName
+    FROM wms.Users u
+    JOIN wms.Roles r ON r.Id = u.RoleId
+    WHERE u.Id = @UserId;
 END
 GO
 

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Security.Claims;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -28,19 +29,27 @@ public class RecordingsController : ControllerBase
         _logger = logger;
     }
 
+    private int CallerRoleId =>
+        int.TryParse(User.FindFirstValue("RoleId"), out var r) ? r : 0;
+
+    private int CallerUserId =>
+        int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var u) ? u : 0;
+
     // -------------------------------------------------------
     // GET /api/recordings
-    // Returns all webinars where TranscriptStatus == 'COMPLETED' AND IsTranscribed == 1,
-    // with WebinarName and full transcript text for student & admin view
+    // Returns webinars where TranscriptStatus == 'COMPLETED' AND IsTranscribed == 1:
+    // - For Admin / Super Admin (RoleId 1 or 2): returns all transcripts.
+    // - For Student (RoleId 3): returns only transcripts for their completed webinars.
     // -------------------------------------------------------
     [HttpGet]
     public async Task<IActionResult> GetCompletedTranscripts()
     {
-        _logger.LogInformation("[RecordingsController] GET /api/recordings (Completed Transcripts)");
+        _logger.LogInformation("[RecordingsController] GET /api/recordings (Completed Transcripts) — CallerUserId: {UserId}, RoleId: {RoleId}", CallerUserId, CallerRoleId);
         using var conn = new SqlConnection(_connectionString);
 
         var list = (await conn.QueryAsync<WebinarRecordingListItemDto>(
             "wms.usp_GetCompletedTranscripts",
+            new { UserId = CallerUserId, RoleId = CallerRoleId },
             commandType: CommandType.StoredProcedure
         )).ToList();
 
@@ -66,9 +75,30 @@ public class RecordingsController : ControllerBase
     [HttpGet("{webinarId:long}/transcript")]
     public async Task<IActionResult> GetWebinarTranscript(long webinarId)
     {
-        _logger.LogInformation("[RecordingsController] GET /api/recordings/{WebinarId}/transcript", webinarId);
+        _logger.LogInformation("[RecordingsController] GET /api/recordings/{WebinarId}/transcript — CallerUserId: {UserId}, RoleId: {RoleId}", webinarId, CallerUserId, CallerRoleId);
 
         using var conn = new SqlConnection(_connectionString);
+
+        // Security check: If student, verify that the student completed this webinar
+        if (CallerRoleId != 1 && CallerRoleId != 2)
+        {
+            var isCompleted = await conn.ExecuteScalarAsync<int>(
+                @"SELECT 1 
+                  FROM wms.WebinarRegistrations reg
+                  LEFT JOIN wms.WebinarCompleted wc ON wc.WebinarRegisterId = reg.Id
+                  INNER JOIN wms.Webinars w ON w.Id = reg.WebinarId
+                  WHERE reg.WebinarId = @WebinarId 
+                    AND reg.UserId = @UserId 
+                    AND (wc.IsAttended = 1 OR w.IsCompleted = 1)",
+                new { WebinarId = webinarId, UserId = CallerUserId }
+            );
+
+            if (isCompleted == 0)
+            {
+                _logger.LogWarning("[RecordingsController] Student {UserId} attempted unauthorized access to transcript for non-completed Webinar {WebinarId}", CallerUserId, webinarId);
+                return Forbid();
+            }
+        }
 
         var record = await conn.QueryFirstOrDefaultAsync<WebinarTranscriptResponseDto>(
             "wms.usp_GetWebinarTranscript",
